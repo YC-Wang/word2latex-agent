@@ -1,87 +1,96 @@
 # word2latex-agent
 
-A Python project scaffold for an AI agent that converts Microsoft Word content
-into structured LaTeX output.
+Version 0.1 converts a `.docx` file into an Overleaf-ready LaTeX project.
 
-## Overview
+## Features
 
-This repository provides a clean starting point for building a Word-to-LaTeX
-agent with:
-
-- a `src/`-based Python package layout
-- isolated virtual environment workflow via `.venv`
-- lint and test configuration
-- GitHub Actions CI
-- GitHub issue, PR, and dependency update templates
-- starter CLI and agent service classes
+- reads `.docx` input directly from the Office XML package
+- detects Word headings and body paragraphs
+- groups content into sections
+- writes `main.tex` plus `sections/*.tex`
+- creates an Overleaf-ready output folder
+- exposes a CLI through `run.py`
 
 ## Project Structure
 
 ```text
 .
-|-- .github/
-|   `-- workflows/
-|       `-- ci.yml
+|-- examples/
+|   `-- sample.docx
+|-- output/
+|   `-- .gitkeep
+|-- prompts/
+|   `-- system_prompt.txt
 |-- src/
 |   `-- word2latex_agent/
 |       |-- __init__.py
 |       |-- agent.py
-|       `-- cli.py
+|       |-- cli.py
+|       |-- config.py
+|       |-- docx_reader.py
+|       |-- latex_writer.py
+|       `-- models.py
+|-- templates/
+|   `-- main.tex.j2
 |-- tests/
-|   |-- __init__.py
-|   `-- test_agent.py
-|-- .editorconfig
-|-- .gitignore
-|-- .python-version
-|-- LICENSE
-|-- pyproject.toml
-|-- README.md
-`-- requirements.txt
+|   |-- fixtures.py
+|   `-- test_conversion.py
+|-- config.yaml
+|-- requirements.txt
+|-- run.py
+`-- README.md
 ```
 
-## Quick Start
-
-1. Create a virtual environment:
+## Setup
 
 ```powershell
 py -3.11 -m venv .venv
-```
-
-2. Activate it:
-
-```powershell
 .venv\Scripts\Activate.ps1
-```
-
-3. Install dependencies:
-
-```powershell
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install -e .
 ```
 
-4. Run the test suite:
+## Usage
+
+Run the converter against the included sample document:
+
+```powershell
+python run.py --input examples/sample.docx --output output/sample_project
+```
+
+Expected output:
+
+```text
+output/sample_project/
+|-- main.tex
+`-- sections/
+    |-- section_01_introduction.tex
+    `-- section_02_method.tex
+```
+
+## Configuration
+
+Default behavior lives in `config.yaml`:
+
+```yaml
+project:
+  title: "Converted Word Document"
+  author: "word2latex-agent"
+latex:
+  document_class: "article"
+  include_toc: true
+```
+
+## Testing
 
 ```powershell
 pytest
 ```
 
-5. Run the starter CLI:
+## Notes
 
-```powershell
-python -m word2latex_agent.cli --input sample.docx --output sample.tex
-```
-
-## Development Notes
-
-- `requirements.txt` contains the base runtime and dev tooling dependencies.
-- `pyproject.toml` defines package metadata and tool configuration.
-- The current implementation includes a placeholder conversion pipeline you can
-  replace with DOCX parsing, prompt orchestration, and LaTeX post-processing.
-
-## Next Steps
-
-- Add DOCX ingestion using `python-docx` or a document extraction pipeline.
-- Add LLM provider integration for semantic restructuring and citation handling.
-- Add validation for generated LaTeX and round-trip regression tests.
+- Headings are detected from Word paragraph styles such as `Heading 1`.
+- Paragraph text is escaped for common LaTeX special characters.
+- If a document starts with body text before any heading, that content is placed
+  into a default `Introduction` section.

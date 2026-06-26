@@ -1,0 +1,6 @@
+project:
+  title: "Converted Word Document"
+  author: "word2latex-agent"
+latex:
+  document_class: "article"
+  include_toc: true

@@ -1,4 +1,4 @@
-"""word2latex_agent package."""
+"""Public package interface for the Word-to-LaTeX agent."""
 
 from .agent import ConversionResult, WordToLatexAgent
 
