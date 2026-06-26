@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "word2latex-agent"
+version = "0.1.0"
+description = "AI agent scaffold for converting Word documents to LaTeX."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "Yi-Chi" }
+]
+dependencies = [
+  "python-docx>=1.1.2,<2.0.0",
+  "click>=8.1.7,<9.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2.0,<9.0.0",
+  "ruff>=0.5.0,<1.0.0",
+  "mypy>=1.10.0,<2.0.0",
+]
+
+[project.scripts]
+word2latex-agent = "word2latex_agent.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["word2latex_agent"]
