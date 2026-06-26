@@ -22,7 +22,14 @@ class WordToLatexAgent:
 
         blocks = read_docx_blocks(source)
         sections = split_into_sections(blocks)
-        main_tex_path, section_files, table_files, bibliography_path, preamble_path = write_project(
+        (
+            main_tex_path,
+            section_files,
+            table_files,
+            figure_files,
+            bibliography_path,
+            preamble_path,
+        ) = write_project(
             destination, sections, self.config
         )
 
@@ -32,6 +39,7 @@ class WordToLatexAgent:
             main_tex_path=main_tex_path,
             section_files=section_files,
             table_files=table_files,
+            figure_files=figure_files,
             bibliography_path=bibliography_path,
             preamble_path=preamble_path,
         )

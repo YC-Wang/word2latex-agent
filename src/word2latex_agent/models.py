@@ -38,7 +38,17 @@ class EquationBlock:
     source_text: str
 
 
-SectionContent: TypeAlias = ParagraphBlock | FigureBlock | TableBlock | EquationBlock
+@dataclass(slots=True)
+class ImageBlock:
+    """Represents an embedded image extracted from the DOCX package."""
+
+    bytes_data: bytes
+    extension: str
+    source_name: str
+    caption: str | None = None
+
+
+SectionContent: TypeAlias = ParagraphBlock | FigureBlock | TableBlock | EquationBlock | ImageBlock
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,5 +91,6 @@ class ConversionResult:
     main_tex_path: Path
     section_files: list[Path]
     table_files: list[Path]
+    figure_files: list[Path]
     bibliography_path: Path
     preamble_path: Path

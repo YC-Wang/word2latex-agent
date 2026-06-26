@@ -1,4 +1,4 @@
-"""Read ordered paragraph, table, and equation content from DOCX files."""
+"""Read ordered paragraph, table, equation, and image content from DOCX files."""
 
 from __future__ import annotations
 
@@ -6,22 +6,28 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
 
-from .models import EquationBlock, FigureBlock, ParagraphBlock, Section, SectionContent, TableBlock
+from .models import EquationBlock, FigureBlock, ImageBlock, ParagraphBlock, Section, SectionContent, TableBlock
 
 WORD_NAMESPACE = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
     "m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
+    "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
 }
 
 
 def read_docx_blocks(path: str | Path) -> list[SectionContent]:
-    """Extract ordered paragraph, figure-caption, table, and equation blocks from a DOCX file."""
+    """Extract ordered paragraph, figure, table, equation, and image blocks from a DOCX file."""
     source = Path(path)
     with ZipFile(source) as archive:
         document_xml = archive.read("word/document.xml")
         styles_xml = (
             archive.read("word/styles.xml") if "word/styles.xml" in archive.namelist() else None
         )
+        relationship_map = _parse_relationships(
+            archive.read("word/_rels/document.xml.rels")
+        ) if "word/_rels/document.xml.rels" in archive.namelist() else {}
+        media_map = _load_related_media(archive, relationship_map)
 
     style_map = _parse_styles(styles_xml) if styles_xml is not None else {}
     root = ET.fromstring(document_xml)
@@ -31,12 +37,13 @@ def read_docx_blocks(path: str | Path) -> list[SectionContent]:
 
     blocks: list[SectionContent] = []
     pending_table_caption: str | None = None
+    pending_figure_caption: str | None = None
 
     for child in list(body):
         local_name = _local_name(child.tag)
 
         if local_name == "p":
-            paragraph_blocks = _parse_paragraph_blocks(child, style_map)
+            paragraph_blocks = _parse_paragraph_blocks(child, style_map, media_map)
             if not paragraph_blocks:
                 continue
 
@@ -46,13 +53,21 @@ def read_docx_blocks(path: str | Path) -> list[SectionContent]:
                 if pending_table_caption is not None:
                     blocks.append(ParagraphBlock(text=pending_table_caption, style="Normal"))
                     pending_table_caption = None
-                blocks.extend(paragraph_blocks)
+                for block in paragraph_blocks:
+                    if isinstance(block, ImageBlock) and pending_figure_caption is not None:
+                        block.caption = pending_figure_caption
+                        pending_figure_caption = None
+                    blocks.append(block)
+                _flush_pending_figure_caption(blocks, pending_figure_caption)
+                pending_figure_caption = None
                 continue
 
             if _is_heading(paragraph.style):
                 if pending_table_caption is not None:
                     blocks.append(ParagraphBlock(text=pending_table_caption, style="Normal"))
                     pending_table_caption = None
+                _flush_pending_figure_caption(blocks, pending_figure_caption)
+                pending_figure_caption = None
                 blocks.append(paragraph)
                 continue
 
@@ -61,27 +76,37 @@ def read_docx_blocks(path: str | Path) -> list[SectionContent]:
                 if pending_table_caption is not None:
                     blocks.append(ParagraphBlock(text=pending_table_caption, style="Normal"))
                     pending_table_caption = None
-                blocks.append(FigureBlock(caption=paragraph.text))
+                if _attach_caption_to_previous_image(blocks, paragraph.text):
+                    pending_figure_caption = None
+                else:
+                    pending_figure_caption = paragraph.text
                 continue
             if caption_kind == "table":
                 if pending_table_caption is not None:
                     blocks.append(ParagraphBlock(text=pending_table_caption, style="Normal"))
+                _flush_pending_figure_caption(blocks, pending_figure_caption)
+                pending_figure_caption = None
                 pending_table_caption = paragraph.text
                 continue
 
             if pending_table_caption is not None:
                 blocks.append(ParagraphBlock(text=pending_table_caption, style="Normal"))
                 pending_table_caption = None
+            _flush_pending_figure_caption(blocks, pending_figure_caption)
+            pending_figure_caption = None
             blocks.append(paragraph)
             continue
 
         if local_name == "tbl":
             table = _parse_table(child, pending_table_caption)
             pending_table_caption = None
+            _flush_pending_figure_caption(blocks, pending_figure_caption)
+            pending_figure_caption = None
             blocks.append(table)
 
     if pending_table_caption is not None:
         blocks.append(ParagraphBlock(text=pending_table_caption, style="Normal"))
+    _flush_pending_figure_caption(blocks, pending_figure_caption)
 
     return blocks
 
@@ -130,7 +155,7 @@ def _find_paragraph_style_id(paragraph: ET.Element) -> str | None:
 
 
 def _parse_paragraph_blocks(
-    paragraph: ET.Element, style_map: dict[str, str]
+    paragraph: ET.Element, style_map: dict[str, str], media_map: dict[str, tuple[str, bytes]]
 ) -> list[SectionContent]:
     style_id = _find_paragraph_style_id(paragraph)
     style_name = style_map.get(style_id, style_id or "Normal")
@@ -140,7 +165,20 @@ def _parse_paragraph_blocks(
     for child in list(paragraph):
         local_name = _local_name(child.tag)
         if local_name == "r":
-            buffered_text.extend(node.text or "" for node in child.findall(".//w:t", WORD_NAMESPACE))
+            for run_child in list(child):
+                run_local_name = _local_name(run_child.tag)
+                if run_local_name == "t":
+                    buffered_text.append(run_child.text or "")
+                    continue
+                if run_local_name == "drawing":
+                    _flush_text_block(buffered_text, style_name, blocks)
+                    image_block = _parse_image_block(run_child, media_map)
+                    if image_block is not None:
+                        blocks.append(image_block)
+                    continue
+                buffered_text.extend(
+                    node.text or "" for node in run_child.findall(".//w:t", WORD_NAMESPACE)
+                )
             continue
         if local_name in {"oMath", "oMathPara"}:
             _flush_text_block(buffered_text, style_name, blocks)
@@ -173,6 +211,48 @@ def _detect_caption_kind(text: str) -> str | None:
     if lowered.startswith("table"):
         return "table"
     return None
+
+
+def _parse_relationships(relationships_xml: bytes) -> dict[str, str]:
+    root = ET.fromstring(relationships_xml)
+    relationship_map: dict[str, str] = {}
+    for relationship in root.findall("{http://schemas.openxmlformats.org/package/2006/relationships}Relationship"):
+        relationship_id = relationship.attrib.get("Id")
+        target = relationship.attrib.get("Target")
+        if relationship_id and target:
+            relationship_map[relationship_id] = target
+    return relationship_map
+
+
+def _load_related_media(
+    archive: ZipFile, relationship_map: dict[str, str]
+) -> dict[str, tuple[str, bytes]]:
+    media_map: dict[str, tuple[str, bytes]] = {}
+    for relationship_id, target in relationship_map.items():
+        normalized = target.replace("\\", "/")
+        if not normalized.startswith("media/"):
+            continue
+        package_path = "word/" + normalized
+        if package_path not in archive.namelist():
+            continue
+        media_map[relationship_id] = (Path(normalized).name, archive.read(package_path))
+    return media_map
+
+
+def _parse_image_block(
+    drawing: ET.Element, media_map: dict[str, tuple[str, bytes]]
+) -> ImageBlock | None:
+    blip = drawing.find(".//a:blip", WORD_NAMESPACE)
+    if blip is None:
+        return None
+    relationship_id = blip.attrib.get(f"{{{WORD_NAMESPACE['r']}}}embed")
+    if relationship_id is None or relationship_id not in media_map:
+        return None
+    source_name, bytes_data = media_map[relationship_id]
+    extension = Path(source_name).suffix.lower().lstrip(".")
+    if extension not in {"png", "jpg", "jpeg"}:
+        extension = extension or "png"
+    return ImageBlock(bytes_data=bytes_data, extension=extension, source_name=source_name)
 
 
 def _parse_equation_block(node: ET.Element) -> EquationBlock:
@@ -242,6 +322,23 @@ def _flush_text_block(
     buffered_text.clear()
     if text:
         blocks.append(ParagraphBlock(text=text, style=style_name))
+
+
+def _attach_caption_to_previous_image(blocks: list[SectionContent], caption: str) -> bool:
+    if not blocks:
+        return False
+    last_block = blocks[-1]
+    if isinstance(last_block, ImageBlock) and last_block.caption is None:
+        last_block.caption = caption
+        return True
+    return False
+
+
+def _flush_pending_figure_caption(
+    blocks: list[SectionContent], pending_figure_caption: str | None
+) -> None:
+    if pending_figure_caption is not None:
+        blocks.append(FigureBlock(caption=pending_figure_caption))
 
 
 def _is_heading(style_name: str) -> bool:

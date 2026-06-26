@@ -1,7 +1,7 @@
 # word2latex-agent
 
-Version 0.4 converts a `.docx` file into an Overleaf-ready LaTeX project with
-section, table, figure-placeholder, citation, and basic equation support.
+Version 0.5 converts a `.docx` file into an Overleaf-ready LaTeX project with
+section, table, embedded figure, citation, and basic equation support.
 
 ## Features
 
@@ -10,7 +10,8 @@ section, table, figure-placeholder, citation, and basic equation support.
 - groups content into sections while preserving block order
 - converts Word tables into LaTeX `table` environments
 - moves large tables into `tables/*.tex` and includes them from section files
-- detects likely figure captions and emits figure placeholders with stable labels
+- extracts embedded DOCX images into `figures/` and emits LaTeX figure environments
+- matches nearby figure captions when possible and falls back to `TODO: Add caption`
 - converts simple author-year citations into `natbib` commands
 - generates `references.bib` with placeholder BibTeX entries
 - writes `preamble.tex` with `natbib` enabled
@@ -75,6 +76,8 @@ output/sample_project/
 |-- main.tex
 |-- preamble.tex
 |-- references.bib
+|-- figures/
+|   `-- figure_001.png
 |-- tables/
 |   `-- table_01_01_table_1_results_summary.tex
 `-- sections/
@@ -106,7 +109,9 @@ python -m unittest
 - Headings are detected from Word paragraph styles such as `Heading 1`.
 - Paragraph text is escaped for common LaTeX special characters.
 - Large tables are externalized when they have at least 5 rows or 4 columns.
-- Figure captions starting with `Figure` or `Fig.` become figure placeholders.
+- Embedded images are saved with stable filenames such as `figure_001.png`.
+- Figure captions starting with `Figure` or `Fig.` are matched to nearby images when possible.
+- If figure caption matching is uncertain, the generated figure uses `TODO: Add caption`.
 - Table captions starting with `Table` are attached to the next Word table when possible.
 - Stable labels are generated with `fig:` and `tab:` prefixes.
 - Displayed equations are labeled with the `eq:` prefix.

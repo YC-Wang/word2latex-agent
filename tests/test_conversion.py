@@ -5,7 +5,7 @@ import unittest
 from word2latex_agent import WordToLatexAgent
 from word2latex_agent.citations import convert_text_citations
 from word2latex_agent.docx_reader import read_docx_blocks, read_docx_paragraphs, split_into_sections
-from word2latex_agent.models import EquationBlock, FigureBlock, TableBlock
+from word2latex_agent.models import EquationBlock, FigureBlock, ImageBlock, TableBlock
 
 from .fixtures import make_docx
 
@@ -240,6 +240,72 @@ class ConversionTests(unittest.TestCase):
             self.assertIn(r"x^{2}", section_tex)
             self.assertLess(section_tex.index("Before equation."), section_tex.index(r"\begin{equation}"))
             self.assertLess(section_tex.index(r"\end{equation}"), section_tex.index("After equation."))
+
+    def test_extracts_embedded_images_and_generates_filenames(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Figures"),
+                    {"image": {"filename": "source.png", "bytes": b"\x89PNG\r\n\x1a\nfakepng"}},
+                    {"image": {"filename": "photo.jpg", "bytes": b"\xff\xd8\xfffakejpg"}},
+                ],
+            )
+
+            blocks = read_docx_blocks(source)
+            self.assertEqual(sum(isinstance(block, ImageBlock) for block in blocks), 2)
+
+            result = WordToLatexAgent().convert(source, output_dir)
+
+            self.assertEqual([path.name for path in result.figure_files], ["figure_001.png", "figure_002.jpg"])
+            self.assertEqual(result.figure_files[0].read_bytes(), b"\x89PNG\r\n\x1a\nfakepng")
+            self.assertEqual(result.figure_files[1].read_bytes(), b"\xff\xd8\xfffakejpg")
+
+    def test_generates_includegraphics_and_matches_caption(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Figures"),
+                    ("Normal", "Figure 1 Pipeline Overview"),
+                    {"image": {"filename": "diagram.png", "bytes": b"\x89PNG\r\n\x1a\ndiagram"}},
+                ],
+            )
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            section_tex = result.section_files[0].read_text(encoding="utf-8")
+            preamble = result.preamble_path.read_text(encoding="utf-8")
+
+            self.assertIn(r"\includegraphics[width=\linewidth]{figures/figure_001.png}", section_tex)
+            self.assertIn(r"\caption{Figure 1 Pipeline Overview}", section_tex)
+            self.assertIn(r"\label{fig:figures_figure_1_pipeline_overview}", section_tex)
+            self.assertIn(r"\usepackage{graphicx}", preamble)
+
+    def test_inserts_todo_caption_when_matching_is_uncertain(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Figures"),
+                    {"image": {"filename": "uncaptioned.jpeg", "bytes": b"\xff\xd8\xffjpeg"}},
+                    ("Normal", "Body paragraph after image."),
+                ],
+            )
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            section_tex = result.section_files[0].read_text(encoding="utf-8")
+
+            self.assertIn(r"\includegraphics[width=\linewidth]{figures/figure_001.jpeg}", section_tex)
+            self.assertIn(r"\caption{TODO: Add caption}", section_tex)
 
 
 if __name__ == "__main__":

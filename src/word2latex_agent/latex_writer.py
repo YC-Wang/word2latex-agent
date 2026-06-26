@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .citations import convert_text_citations, render_bibliography
-from .models import CitationRecord, EquationBlock, FigureBlock, ParagraphBlock, Section, TableBlock, slugify
+from .models import CitationRecord, EquationBlock, FigureBlock, ImageBlock, ParagraphBlock, Section, TableBlock, slugify
 
 LARGE_TABLE_ROW_THRESHOLD = 5
 LARGE_TABLE_COLUMN_THRESHOLD = 4
@@ -20,18 +20,24 @@ def write_project(
     root = Path(output_dir)
     sections_dir = root / "sections"
     tables_dir = root / "tables"
+    figures_dir = root / "figures"
     sections_dir.mkdir(parents=True, exist_ok=True)
     tables_dir.mkdir(parents=True, exist_ok=True)
+    figures_dir.mkdir(parents=True, exist_ok=True)
 
     section_files: list[Path] = []
     table_files: list[Path] = []
+    figure_files: list[Path] = []
     all_citations: list[CitationRecord] = []
     for index, section in enumerate(sections, start=1):
         section_path = sections_dir / f"section_{index:02d}_{section.slug}.tex"
-        section_text, created_table_files, citations = _render_section(section, index, tables_dir)
+        section_text, created_table_files, created_figure_files, citations = _render_section(
+            section, index, tables_dir, figures_dir, len(figure_files)
+        )
         section_path.write_text(section_text, encoding="utf-8")
         section_files.append(section_path)
         table_files.extend(created_table_files)
+        figure_files.extend(created_figure_files)
         all_citations.extend(citations)
 
     preamble_path = root / "preamble.tex"
@@ -40,7 +46,7 @@ def write_project(
     bibliography_path.write_text(render_bibliography(all_citations), encoding="utf-8")
     main_tex = root / "main.tex"
     main_tex.write_text(_render_main(config, section_files), encoding="utf-8")
-    return main_tex, section_files, table_files, bibliography_path, preamble_path
+    return main_tex, section_files, table_files, figure_files, bibliography_path, preamble_path
 
 
 def _render_main(config: dict[str, object], section_files: list[Path]) -> str:
@@ -69,10 +75,11 @@ def _render_main(config: dict[str, object], section_files: list[Path]) -> str:
 
 
 def _render_section(
-    section: Section, section_index: int, tables_dir: Path
-) -> tuple[str, list[Path], list[CitationRecord]]:
+    section: Section, section_index: int, tables_dir: Path, figures_dir: Path, figure_offset: int
+) -> tuple[str, list[Path], list[Path], list[CitationRecord]]:
     lines = [r"\section{" + _escape_latex(section.title) + "}"]
     created_table_files: list[Path] = []
+    created_figure_files: list[Path] = []
     citations: list[CitationRecord] = []
     figure_count = 0
     table_count = 0
@@ -101,6 +108,29 @@ def _render_section(
             )
             continue
 
+        if isinstance(block, ImageBlock):
+            figure_count += 1
+            global_figure_index = figure_offset + len(created_figure_files) + 1
+            figure_path = figures_dir / f"figure_{global_figure_index:03d}.{block.extension}"
+            figure_path.write_bytes(block.bytes_data)
+            created_figure_files.append(figure_path)
+            caption = block.caption or "TODO: Add caption"
+            label_source = block.caption or figure_path.stem
+            label = f"fig:{section.slug}_{slugify(label_source, fallback=f'figure_{figure_count}')}"
+            include_path = figure_path.relative_to(figure_path.parent.parent).as_posix()
+            lines.extend(
+                [
+                    r"\begin{figure}[htbp]",
+                    r"\centering",
+                    r"\includegraphics[width=\linewidth]{" + include_path + "}",
+                    r"\caption{" + _escape_latex(caption) + "}",
+                    r"\label{" + label + "}",
+                    r"\end{figure}",
+                    "",
+                ]
+            )
+            continue
+
         if isinstance(block, TableBlock):
             table_count += 1
             table_label = _build_table_label(section, block, table_count)
@@ -120,7 +150,7 @@ def _render_section(
             equation_label = _build_equation_label(section, block, equation_count)
             lines.extend(_render_equation(block, equation_label))
 
-    return "\n".join(lines).rstrip() + "\n", created_table_files, citations
+    return "\n".join(lines).rstrip() + "\n", created_table_files, created_figure_files, citations
 
 
 def _render_table(block: TableBlock, label: str) -> str:
@@ -199,6 +229,7 @@ def _render_preamble() -> str:
             r"\usepackage[T1]{fontenc}",
             r"\usepackage{natbib}",
             r"\usepackage{amsmath}",
+            r"\usepackage{graphicx}",
             "",
         ]
     )
