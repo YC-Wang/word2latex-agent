@@ -3,6 +3,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from word2latex_agent import WordToLatexAgent
+from word2latex_agent.citations import convert_text_citations
 from word2latex_agent.docx_reader import read_docx_blocks, read_docx_paragraphs, split_into_sections
 from word2latex_agent.models import FigureBlock, TableBlock
 
@@ -59,7 +60,10 @@ class ConversionTests(unittest.TestCase):
             self.assertEqual(result.main_tex_path, output_dir / "main.tex")
             self.assertEqual(len(result.section_files), 2)
             self.assertIn(r"\tableofcontents", main_tex)
+            self.assertIn(r"\input{preamble}", main_tex)
             self.assertIn(r"\input{sections/section_01_introduction}", main_tex)
+            self.assertIn(r"\bibliographystyle{plainnat}", main_tex)
+            self.assertIn(r"\bibliography{references}", main_tex)
             self.assertIn(r"\section{Introduction}", first_section)
             self.assertIn(r"Paragraph with 100\% coverage \& details.", first_section)
 
@@ -129,6 +133,52 @@ class ConversionTests(unittest.TestCase):
             self.assertIn(r"\label{fig:analysis_figure_1_model_overview}", section_tex)
             self.assertIn(r"\caption{Table 2 Metrics}", section_tex)
             self.assertIn(r"\label{tab:analysis_table_2_metrics}", section_tex)
+
+    def test_citation_detection_and_bibliography_generation(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Related Work"),
+                    (
+                        "Normal",
+                        "Prior work includes (Wang et al., 2024) and Wang et al. (2024).",
+                    ),
+                    (
+                        "Normal",
+                        "Benchmarks were reported in (Coppola et al., 2021; Davolio et al., 2016).",
+                    ),
+                ],
+            )
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            section_tex = result.section_files[0].read_text(encoding="utf-8")
+            bibliography = result.bibliography_path.read_text(encoding="utf-8")
+            preamble = result.preamble_path.read_text(encoding="utf-8")
+
+            self.assertIn(r"\citep{wang2024}", section_tex)
+            self.assertIn(r"\citet{wang2024}", section_tex)
+            self.assertIn(r"\citep{coppola2021,davolio2016}", section_tex)
+            self.assertIn(r"\usepackage{natbib}", preamble)
+            self.assertIn("@article{wang2024,", bibliography)
+            self.assertIn("@article{coppola2021,", bibliography)
+            self.assertIn("@article{davolio2016,", bibliography)
+
+    def test_convert_text_citations_handles_supported_patterns(self) -> None:
+        converted, citations = convert_text_citations(
+            "See (Wang et al., 2024), Wang et al. (2024), and (Coppola et al., 2021; Davolio et al., 2016)."
+        )
+
+        self.assertIn(r"\citep{wang2024}", converted)
+        self.assertIn(r"\citet{wang2024}", converted)
+        self.assertIn(r"\citep{coppola2021,davolio2016}", converted)
+        self.assertEqual(
+            sorted(citation.key for citation in citations),
+            ["coppola2021", "davolio2016", "wang2024"],
+        )
 
 
 if __name__ == "__main__":

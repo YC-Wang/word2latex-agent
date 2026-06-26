@@ -1,7 +1,7 @@
 # word2latex-agent
 
-Version 0.2 converts a `.docx` file into an Overleaf-ready LaTeX project with
-section, table, and figure-placeholder support.
+Version 0.3 converts a `.docx` file into an Overleaf-ready LaTeX project with
+section, table, figure-placeholder, and basic citation support.
 
 ## Features
 
@@ -11,6 +11,9 @@ section, table, and figure-placeholder support.
 - converts Word tables into LaTeX `table` environments
 - moves large tables into `tables/*.tex` and includes them from section files
 - detects likely figure captions and emits figure placeholders with stable labels
+- converts simple author-year citations into `natbib` commands
+- generates `references.bib` with placeholder BibTeX entries
+- writes `preamble.tex` with `natbib` enabled
 - writes `main.tex` plus `sections/*.tex`
 - creates an Overleaf-ready output folder
 - exposes a CLI through `run.py`
@@ -68,6 +71,8 @@ Expected output:
 ```text
 output/sample_project/
 |-- main.tex
+|-- preamble.tex
+|-- references.bib
 |-- tables/
 |   `-- table_01_01_table_1_results_summary.tex
 `-- sections/
@@ -102,6 +107,10 @@ python -m unittest
 - Figure captions starting with `Figure` or `Fig.` become figure placeholders.
 - Table captions starting with `Table` are attached to the next Word table when possible.
 - Stable labels are generated with `fig:` and `tab:` prefixes.
+- Supported citation forms include `(Wang et al., 2024)`, `Wang et al. (2024)`,
+  and multi-citations such as `(Coppola et al., 2021; Davolio et al., 2016)`.
+- Citation keys are generated as lowercase `lastname + year`, such as `wang2024`.
+- `references.bib` currently contains placeholder BibTeX entries only.
 - If a document starts with body text before any heading, that content is placed
   into a default `Introduction` section.
-- Citation conversion and Overleaf sync are intentionally not implemented yet.
+- Overleaf sync is intentionally not implemented yet.

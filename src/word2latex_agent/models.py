@@ -33,6 +33,15 @@ class TableBlock:
 SectionContent: TypeAlias = ParagraphBlock | FigureBlock | TableBlock
 
 
+@dataclass(frozen=True, slots=True)
+class CitationRecord:
+    """Represents a detected citation and its placeholder bibliography entry."""
+
+    key: str
+    author_token: str
+    year: str
+
+
 @dataclass(slots=True)
 class Section:
     """Represents a logical section in the generated LaTeX project."""
@@ -64,3 +73,5 @@ class ConversionResult:
     main_tex_path: Path
     section_files: list[Path]
     table_files: list[Path]
+    bibliography_path: Path
+    preamble_path: Path

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .models import FigureBlock, ParagraphBlock, Section, TableBlock, slugify
+from .citations import convert_text_citations, render_bibliography
+from .models import CitationRecord, FigureBlock, ParagraphBlock, Section, TableBlock, slugify
 
 LARGE_TABLE_ROW_THRESHOLD = 5
 LARGE_TABLE_COLUMN_THRESHOLD = 4
@@ -14,7 +15,7 @@ def write_project(
     output_dir: str | Path,
     sections: list[Section],
     config: dict[str, object],
-) -> tuple[Path, list[Path], list[Path]]:
+) -> tuple[Path, list[Path], list[Path], Path, Path]:
     """Write `main.tex` and section files into the output directory."""
     root = Path(output_dir)
     sections_dir = root / "sections"
@@ -24,16 +25,22 @@ def write_project(
 
     section_files: list[Path] = []
     table_files: list[Path] = []
+    all_citations: list[CitationRecord] = []
     for index, section in enumerate(sections, start=1):
         section_path = sections_dir / f"section_{index:02d}_{section.slug}.tex"
-        section_text, created_table_files = _render_section(section, index, tables_dir)
+        section_text, created_table_files, citations = _render_section(section, index, tables_dir)
         section_path.write_text(section_text, encoding="utf-8")
         section_files.append(section_path)
         table_files.extend(created_table_files)
+        all_citations.extend(citations)
 
+    preamble_path = root / "preamble.tex"
+    preamble_path.write_text(_render_preamble(), encoding="utf-8")
+    bibliography_path = root / "references.bib"
+    bibliography_path.write_text(render_bibliography(all_citations), encoding="utf-8")
     main_tex = root / "main.tex"
     main_tex.write_text(_render_main(config, section_files), encoding="utf-8")
-    return main_tex, section_files, table_files
+    return main_tex, section_files, table_files, bibliography_path, preamble_path
 
 
 def _render_main(config: dict[str, object], section_files: list[Path]) -> str:
@@ -46,8 +53,7 @@ def _render_main(config: dict[str, object], section_files: list[Path]) -> str:
 
     lines = [
         rf"\documentclass{{{document_class}}}",
-        r"\usepackage[utf8]{inputenc}",
-        r"\usepackage[T1]{fontenc}",
+        r"\input{preamble}",
         r"\title{" + title + "}",
         r"\author{" + author + "}",
         r"\begin{document}",
@@ -58,19 +64,24 @@ def _render_main(config: dict[str, object], section_files: list[Path]) -> str:
     for section_file in section_files:
         include_path = section_file.relative_to(section_file.parent.parent).with_suffix("")
         lines.append(r"\input{" + include_path.as_posix() + "}")
-    lines.extend([r"\end{document}", ""])
+    lines.extend([r"\bibliographystyle{plainnat}", r"\bibliography{references}", r"\end{document}", ""])
     return "\n".join(lines)
 
 
-def _render_section(section: Section, section_index: int, tables_dir: Path) -> tuple[str, list[Path]]:
+def _render_section(
+    section: Section, section_index: int, tables_dir: Path
+) -> tuple[str, list[Path], list[CitationRecord]]:
     lines = [r"\section{" + _escape_latex(section.title) + "}"]
     created_table_files: list[Path] = []
+    citations: list[CitationRecord] = []
     figure_count = 0
     table_count = 0
 
     for block in section.blocks:
         if isinstance(block, ParagraphBlock):
-            lines.extend([_escape_latex(block.text), ""])
+            rendered_text, paragraph_citations = _render_text_with_citations(block.text)
+            citations.extend(paragraph_citations)
+            lines.extend([rendered_text, ""])
             continue
 
         if isinstance(block, FigureBlock):
@@ -102,7 +113,7 @@ def _render_section(section: Section, section_index: int, tables_dir: Path) -> t
             else:
                 lines.extend([rendered_table.rstrip(), ""])
 
-    return "\n".join(lines).rstrip() + "\n", created_table_files
+    return "\n".join(lines).rstrip() + "\n", created_table_files, citations
 
 
 def _render_table(block: TableBlock, label: str) -> str:
@@ -136,6 +147,38 @@ def _is_large_table(block: TableBlock) -> bool:
 def _build_table_label(section: Section, block: TableBlock, table_count: int) -> str:
     source = block.caption or f"{section.title} table {table_count}"
     return f"tab:{section.slug}_{slugify(source, fallback=f'table_{table_count}')}"
+
+
+def _render_text_with_citations(text: str) -> tuple[str, list[CitationRecord]]:
+    converted, citations = convert_text_citations(text)
+    parts = converted.split("\\")
+    if not parts:
+        return "", citations
+
+    rendered = [_escape_latex(parts[0])]
+    for part in parts[1:]:
+        rendered.append("\\")
+        macro, separator, remainder = part.partition("{")
+        if separator:
+            command = macro + "{"
+            body, body_separator, tail = remainder.partition("}")
+            if body_separator:
+                rendered.append(command + body + "}")
+                rendered.append(_escape_latex(tail))
+                continue
+        rendered.append(_escape_latex(part))
+    return "".join(rendered), citations
+
+
+def _render_preamble() -> str:
+    return "\n".join(
+        [
+            r"\usepackage[utf8]{inputenc}",
+            r"\usepackage[T1]{fontenc}",
+            r"\usepackage{natbib}",
+            "",
+        ]
+    )
 
 
 def _escape_latex(text: str) -> str:
