@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .config import load_config
-from .docx_reader import read_docx_paragraphs, split_into_sections
+from .docx_reader import read_docx_blocks, split_into_sections
 from .latex_writer import write_project
 from .models import ConversionResult
 
@@ -20,13 +20,14 @@ class WordToLatexAgent:
         source = Path(input_path)
         destination = Path(output_dir)
 
-        paragraphs = read_docx_paragraphs(source)
-        sections = split_into_sections(paragraphs)
-        main_tex_path, section_files = write_project(destination, sections, self.config)
+        blocks = read_docx_blocks(source)
+        sections = split_into_sections(blocks)
+        main_tex_path, section_files, table_files = write_project(destination, sections, self.config)
 
         return ConversionResult(
             input_path=source,
             output_dir=destination,
             main_tex_path=main_tex_path,
             section_files=section_files,
+            table_files=table_files,
         )

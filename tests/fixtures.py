@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TypeAlias
 from zipfile import ZipFile
+
+ParagraphFixture: TypeAlias = tuple[str, str]
+TableFixture: TypeAlias = dict[str, list[list[str]]]
+DocxFixtureBlock: TypeAlias = ParagraphFixture | TableFixture
 
 CONTENT_TYPES_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -28,8 +33,8 @@ STYLES_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 """
 
 
-def make_docx(path: Path, paragraphs: list[tuple[str, str]]) -> None:
-    document_xml = _build_document_xml(paragraphs)
+def make_docx(path: Path, blocks: list[DocxFixtureBlock]) -> None:
+    document_xml = _build_document_xml(blocks)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     with ZipFile(path, "w") as archive:
@@ -39,19 +44,35 @@ def make_docx(path: Path, paragraphs: list[tuple[str, str]]) -> None:
         archive.writestr("word/styles.xml", STYLES_XML)
 
 
-def _build_document_xml(paragraphs: list[tuple[str, str]]) -> str:
+def _build_document_xml(blocks: list[DocxFixtureBlock]) -> str:
     body = []
-    for style_id, text in paragraphs:
-        body.append(
-            "<w:p>"
-            "<w:pPr>"
-            f'<w:pStyle w:val="{style_id}"/>'
-            "</w:pPr>"
-            "<w:r>"
-            f"<w:t>{_escape_xml(text)}</w:t>"
-            "</w:r>"
-            "</w:p>"
-        )
+    for block in blocks:
+        if isinstance(block, tuple):
+            style_id, text = block
+            body.append(
+                "<w:p>"
+                "<w:pPr>"
+                f'<w:pStyle w:val="{style_id}"/>'
+                "</w:pPr>"
+                "<w:r>"
+                f"<w:t>{_escape_xml(text)}</w:t>"
+                "</w:r>"
+                "</w:p>"
+            )
+            continue
+
+        rows = block.get("rows", [])
+        cells_xml: list[str] = []
+        for row in rows:
+            row_xml = "".join(
+                "<w:tc><w:p><w:r><w:t>"
+                + _escape_xml(cell)
+                + "</w:t></w:r></w:p></w:tc>"
+                for cell in row
+            )
+            cells_xml.append("<w:tr>" + row_xml + "</w:tr>")
+        body.append("<w:tbl>" + "".join(cells_xml) + "</w:tbl>")
+
     joined = "".join(body)
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'

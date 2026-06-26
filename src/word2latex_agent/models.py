@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TypeAlias
 
 
 @dataclass(slots=True)
@@ -15,20 +16,43 @@ class ParagraphBlock:
 
 
 @dataclass(slots=True)
+class FigureBlock:
+    """Represents a detected figure caption placeholder."""
+
+    caption: str
+
+
+@dataclass(slots=True)
+class TableBlock:
+    """Represents a table extracted from a Word document."""
+
+    rows: list[list[str]]
+    caption: str | None = None
+
+
+SectionContent: TypeAlias = ParagraphBlock | FigureBlock | TableBlock
+
+
+@dataclass(slots=True)
 class Section:
     """Represents a logical section in the generated LaTeX project."""
 
     title: str
-    paragraphs: list[str] = field(default_factory=list)
+    blocks: list[SectionContent] = field(default_factory=list)
 
     @property
     def slug(self) -> str:
-        normalized = "".join(
-            character.lower() if character.isalnum() else "_"
-            for character in self.title.strip()
-        )
-        compact = "_".join(part for part in normalized.split("_") if part)
-        return compact or "section"
+        return slugify(self.title, fallback="section")
+
+
+def slugify(text: str, fallback: str) -> str:
+    """Convert arbitrary text into a deterministic ASCII-ish slug."""
+    normalized = "".join(
+        character.lower() if character.isalnum() else "_"
+        for character in text.strip()
+    )
+    compact = "_".join(part for part in normalized.split("_") if part)
+    return compact or fallback
 
 
 @dataclass(slots=True)
@@ -39,3 +63,4 @@ class ConversionResult:
     output_dir: Path
     main_tex_path: Path
     section_files: list[Path]
+    table_files: list[Path]

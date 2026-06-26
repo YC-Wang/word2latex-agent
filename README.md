@@ -1,12 +1,16 @@
 # word2latex-agent
 
-Version 0.1 converts a `.docx` file into an Overleaf-ready LaTeX project.
+Version 0.2 converts a `.docx` file into an Overleaf-ready LaTeX project with
+section, table, and figure-placeholder support.
 
 ## Features
 
 - reads `.docx` input directly from the Office XML package
 - detects Word headings and body paragraphs
-- groups content into sections
+- groups content into sections while preserving block order
+- converts Word tables into LaTeX `table` environments
+- moves large tables into `tables/*.tex` and includes them from section files
+- detects likely figure captions and emits figure placeholders with stable labels
 - writes `main.tex` plus `sections/*.tex`
 - creates an Overleaf-ready output folder
 - exposes a CLI through `run.py`
@@ -64,6 +68,8 @@ Expected output:
 ```text
 output/sample_project/
 |-- main.tex
+|-- tables/
+|   `-- table_01_01_table_1_results_summary.tex
 `-- sections/
     |-- section_01_introduction.tex
     `-- section_02_method.tex
@@ -85,12 +91,17 @@ latex:
 ## Testing
 
 ```powershell
-pytest
+python -m unittest
 ```
 
 ## Notes
 
 - Headings are detected from Word paragraph styles such as `Heading 1`.
 - Paragraph text is escaped for common LaTeX special characters.
+- Large tables are externalized when they have at least 5 rows or 4 columns.
+- Figure captions starting with `Figure` or `Fig.` become figure placeholders.
+- Table captions starting with `Table` are attached to the next Word table when possible.
+- Stable labels are generated with `fig:` and `tab:` prefixes.
 - If a document starts with body text before any heading, that content is placed
   into a default `Introduction` section.
+- Citation conversion and Overleaf sync are intentionally not implemented yet.
