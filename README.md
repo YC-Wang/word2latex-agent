@@ -1,7 +1,8 @@
 # word2latex-agent
 
-Version 0.5 converts a `.docx` file into an Overleaf-ready LaTeX project with
-section, table, embedded figure, citation, and basic equation support.
+Version 0.6 generates a more complete Overleaf-ready LaTeX project template with
+configurable metadata, plus section, table, embedded figure, citation, and basic
+equation support.
 
 ## Features
 
@@ -14,9 +15,10 @@ section, table, embedded figure, citation, and basic equation support.
 - matches nearby figure captions when possible and falls back to `TODO: Add caption`
 - converts simple author-year citations into `natbib` commands
 - generates `references.bib` with placeholder BibTeX entries
-- writes `preamble.tex` with `natbib` enabled
+- writes an Overleaf-ready `preamble.tex` with common document packages
 - detects OMML equations and converts simple displayed equations to LaTeX
 - preserves unsupported equations with a clear TODO placeholder
+- supports configurable project title, author, date, and document class
 - writes `main.tex` plus `sections/*.tex`
 - creates an Overleaf-ready output folder
 - exposes a CLI through `run.py`
@@ -93,10 +95,21 @@ Default behavior lives in `config.yaml`:
 project:
   title: "Converted Word Document"
   author: "word2latex-agent"
+  date: \today
 latex:
   document_class: "article"
   include_toc: true
 ```
+
+The generated `main.tex` always includes:
+
+- `\documentclass{...}`
+- `\input{preamble}`
+- `\title{...}`, `\author{...}`, `\date{...}`
+- `\begin{document}` and `\maketitle`
+- section inputs from `sections/`
+- `\bibliographystyle{plainnat}` and `\bibliography{references}`
+- `\end{document}`
 
 ## Testing
 
@@ -114,6 +127,8 @@ python -m unittest
 - If figure caption matching is uncertain, the generated figure uses `TODO: Add caption`.
 - Table captions starting with `Table` are attached to the next Word table when possible.
 - Stable labels are generated with `fig:` and `tab:` prefixes.
+- The Overleaf-oriented preamble includes `graphicx`, `natbib`, `booktabs`,
+  `longtable`, `amsmath`, `amssymb`, `hyperref`, and `geometry`.
 - Displayed equations are labeled with the `eq:` prefix.
 - Supported OMML equation conversions are intentionally limited to simple text,
   fractions, superscripts, and subscripts.

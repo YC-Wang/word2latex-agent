@@ -56,16 +56,35 @@ class ConversionTests(unittest.TestCase):
 
             main_tex = result.main_tex_path.read_text(encoding="utf-8")
             first_section = result.section_files[0].read_text(encoding="utf-8")
+            preamble = result.preamble_path.read_text(encoding="utf-8")
 
             self.assertEqual(result.main_tex_path, output_dir / "main.tex")
             self.assertEqual(len(result.section_files), 2)
+            self.assertTrue((output_dir / "sections").is_dir())
+            self.assertTrue((output_dir / "figures").is_dir())
+            self.assertTrue((output_dir / "tables").is_dir())
             self.assertIn(r"\tableofcontents", main_tex)
+            self.assertIn(r"\documentclass{article}", main_tex)
             self.assertIn(r"\input{preamble}", main_tex)
+            self.assertIn(r"\begin{document}", main_tex)
+            self.assertIn(r"\title{Converted Word Document}", main_tex)
+            self.assertIn(r"\author{word2latex-agent}", main_tex)
+            self.assertIn(r"\date{\today}", main_tex)
+            self.assertIn(r"\maketitle", main_tex)
             self.assertIn(r"\input{sections/section_01_introduction}", main_tex)
             self.assertIn(r"\bibliographystyle{plainnat}", main_tex)
             self.assertIn(r"\bibliography{references}", main_tex)
+            self.assertIn(r"\end{document}", main_tex)
             self.assertIn(r"\section{Introduction}", first_section)
             self.assertIn(r"Paragraph with 100\% coverage \& details.", first_section)
+            self.assertIn(r"\usepackage{graphicx}", preamble)
+            self.assertIn(r"\usepackage{natbib}", preamble)
+            self.assertIn(r"\usepackage{booktabs}", preamble)
+            self.assertIn(r"\usepackage{longtable}", preamble)
+            self.assertIn(r"\usepackage{amsmath}", preamble)
+            self.assertIn(r"\usepackage{amssymb}", preamble)
+            self.assertIn(r"\usepackage{hyperref}", preamble)
+            self.assertIn(r"\usepackage[margin=1in]{geometry}", preamble)
 
     def test_table_conversion_preserves_order_and_large_tables_are_externalized(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -306,6 +325,79 @@ class ConversionTests(unittest.TestCase):
 
             self.assertIn(r"\includegraphics[width=\linewidth]{figures/figure_001.jpeg}", section_tex)
             self.assertIn(r"\caption{TODO: Add caption}", section_tex)
+
+    def test_overleaf_template_uses_configured_metadata(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            config_path = temp_path / "custom_config.yaml"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Intro"),
+                    ("Normal", "Configured project."),
+                ],
+            )
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "project:",
+                        '  title: "My Overleaf Project"',
+                        '  author: "Test Author"',
+                        '  date: "2026-01-15"',
+                        "latex:",
+                        '  document_class: "report"',
+                        "  include_toc: false",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = WordToLatexAgent(config_path=config_path).convert(source, output_dir)
+            main_tex = result.main_tex_path.read_text(encoding="utf-8")
+
+            self.assertIn(r"\documentclass{report}", main_tex)
+            self.assertIn(r"\title{My Overleaf Project}", main_tex)
+            self.assertIn(r"\author{Test Author}", main_tex)
+            self.assertIn(r"\date{2026-01-15}", main_tex)
+            self.assertNotIn(r"\tableofcontents", main_tex)
+
+    def test_main_tex_has_overleaf_ready_structure(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Intro"),
+                    ("Normal", "Body text."),
+                ],
+            )
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            main_tex = result.main_tex_path.read_text(encoding="utf-8")
+
+            documentclass_index = main_tex.index(r"\documentclass{article}")
+            preamble_index = main_tex.index(r"\input{preamble}")
+            begin_document_index = main_tex.index(r"\begin{document}")
+            title_index = main_tex.index(r"\title{Converted Word Document}")
+            maketitle_index = main_tex.index(r"\maketitle")
+            section_index = main_tex.index(r"\input{sections/section_01_intro}")
+            bibliography_style_index = main_tex.index(r"\bibliographystyle{plainnat}")
+            bibliography_index = main_tex.index(r"\bibliography{references}")
+            end_document_index = main_tex.index(r"\end{document}")
+
+            self.assertLess(documentclass_index, preamble_index)
+            self.assertLess(preamble_index, title_index)
+            self.assertLess(title_index, begin_document_index)
+            self.assertLess(begin_document_index, maketitle_index)
+            self.assertLess(maketitle_index, section_index)
+            self.assertLess(section_index, bibliography_style_index)
+            self.assertLess(bibliography_style_index, bibliography_index)
+            self.assertLess(bibliography_index, end_document_index)
 
 
 if __name__ == "__main__":

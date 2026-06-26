@@ -10,6 +10,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "project": {
         "title": "Converted Word Document",
         "author": "word2latex-agent",
+        "date": r"\today",
     },
     "latex": {
         "document_class": "article",

@@ -15,7 +15,7 @@ def write_project(
     output_dir: str | Path,
     sections: list[Section],
     config: dict[str, object],
-) -> tuple[Path, list[Path], list[Path], Path, Path]:
+) -> tuple[Path, list[Path], list[Path], list[Path], Path, Path]:
     """Write `main.tex` and section files into the output directory."""
     root = Path(output_dir)
     sections_dir = root / "sections"
@@ -54,6 +54,7 @@ def _render_main(config: dict[str, object], section_files: list[Path]) -> str:
     latex = _get_nested_dict(config, "latex")
     title = _escape_latex(str(project.get("title", "Converted Word Document")))
     author = _escape_latex(str(project.get("author", "word2latex-agent")))
+    date = _render_latex_metadata_value(project.get("date", r"\today"))
     document_class = _escape_latex(str(latex.get("document_class", "article")))
     include_toc = bool(latex.get("include_toc", True))
 
@@ -62,6 +63,7 @@ def _render_main(config: dict[str, object], section_files: list[Path]) -> str:
         r"\input{preamble}",
         r"\title{" + title + "}",
         r"\author{" + author + "}",
+        r"\date{" + date + "}",
         r"\begin{document}",
         r"\maketitle",
     ]
@@ -227,12 +229,24 @@ def _render_preamble() -> str:
         [
             r"\usepackage[utf8]{inputenc}",
             r"\usepackage[T1]{fontenc}",
-            r"\usepackage{natbib}",
-            r"\usepackage{amsmath}",
             r"\usepackage{graphicx}",
+            r"\usepackage{natbib}",
+            r"\usepackage{booktabs}",
+            r"\usepackage{longtable}",
+            r"\usepackage{amsmath}",
+            r"\usepackage{amssymb}",
+            r"\usepackage{hyperref}",
+            r"\usepackage[margin=1in]{geometry}",
             "",
         ]
     )
+
+
+def _render_latex_metadata_value(value: object) -> str:
+    text = str(value)
+    if text.startswith("\\"):
+        return text
+    return _escape_latex(text)
 
 
 def _escape_latex(text: str) -> str:
