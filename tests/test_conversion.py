@@ -5,7 +5,7 @@ import unittest
 from word2latex_agent import WordToLatexAgent
 from word2latex_agent.citations import convert_text_citations
 from word2latex_agent.docx_reader import read_docx_blocks, read_docx_paragraphs, split_into_sections
-from word2latex_agent.models import FigureBlock, TableBlock
+from word2latex_agent.models import EquationBlock, FigureBlock, TableBlock
 
 from .fixtures import make_docx
 
@@ -179,6 +179,67 @@ class ConversionTests(unittest.TestCase):
             sorted(citation.key for citation in citations),
             ["coppola2021", "davolio2016", "wang2024"],
         )
+
+    def test_detects_equations_from_omml(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "sample.docx"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Equations"),
+                    {"equation": {"kind": "fraction", "numerator": "a+b", "denominator": "c"}},
+                    ("Normal", "Trailing paragraph."),
+                ],
+            )
+
+            blocks = read_docx_blocks(source)
+
+            self.assertTrue(any(isinstance(block, EquationBlock) for block in blocks))
+            equation_block = next(block for block in blocks if isinstance(block, EquationBlock))
+            self.assertEqual(equation_block.latex, r"\frac{a+b}{c}")
+
+    def test_preserves_equation_placeholder_when_conversion_fails(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Equations"),
+                    {"equation": {"kind": "unsupported"}},
+                ],
+            )
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            section_tex = result.section_files[0].read_text(encoding="utf-8")
+
+            self.assertIn(r"\begin{equation}", section_tex)
+            self.assertIn(r"% TODO: Equation could not be converted", section_tex)
+            self.assertIn(r"\end{equation}", section_tex)
+
+    def test_generates_equation_labels_and_preserves_order(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Equations"),
+                    ("Normal", "Before equation."),
+                    {"equation": {"kind": "superscript", "base": "x", "sup": "2"}},
+                    ("Normal", "After equation."),
+                ],
+            )
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            section_tex = result.section_files[0].read_text(encoding="utf-8")
+
+            self.assertIn(r"\label{eq:equations_x_2}", section_tex)
+            self.assertIn(r"x^{2}", section_tex)
+            self.assertLess(section_tex.index("Before equation."), section_tex.index(r"\begin{equation}"))
+            self.assertLess(section_tex.index(r"\end{equation}"), section_tex.index("After equation."))
 
 
 if __name__ == "__main__":

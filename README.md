@@ -1,7 +1,7 @@
 # word2latex-agent
 
-Version 0.3 converts a `.docx` file into an Overleaf-ready LaTeX project with
-section, table, figure-placeholder, and basic citation support.
+Version 0.4 converts a `.docx` file into an Overleaf-ready LaTeX project with
+section, table, figure-placeholder, citation, and basic equation support.
 
 ## Features
 
@@ -14,6 +14,8 @@ section, table, figure-placeholder, and basic citation support.
 - converts simple author-year citations into `natbib` commands
 - generates `references.bib` with placeholder BibTeX entries
 - writes `preamble.tex` with `natbib` enabled
+- detects OMML equations and converts simple displayed equations to LaTeX
+- preserves unsupported equations with a clear TODO placeholder
 - writes `main.tex` plus `sections/*.tex`
 - creates an Overleaf-ready output folder
 - exposes a CLI through `run.py`
@@ -107,6 +109,10 @@ python -m unittest
 - Figure captions starting with `Figure` or `Fig.` become figure placeholders.
 - Table captions starting with `Table` are attached to the next Word table when possible.
 - Stable labels are generated with `fig:` and `tab:` prefixes.
+- Displayed equations are labeled with the `eq:` prefix.
+- Supported OMML equation conversions are intentionally limited to simple text,
+  fractions, superscripts, and subscripts.
+- Unsupported equations are preserved as `% TODO: Equation could not be converted`.
 - Supported citation forms include `(Wang et al., 2024)`, `Wang et al. (2024)`,
   and multi-citations such as `(Coppola et al., 2021; Davolio et al., 2016)`.
 - Citation keys are generated as lowercase `lastname + year`, such as `wang2024`.

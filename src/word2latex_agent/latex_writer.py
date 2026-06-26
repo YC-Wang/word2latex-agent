@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .citations import convert_text_citations, render_bibliography
-from .models import CitationRecord, FigureBlock, ParagraphBlock, Section, TableBlock, slugify
+from .models import CitationRecord, EquationBlock, FigureBlock, ParagraphBlock, Section, TableBlock, slugify
 
 LARGE_TABLE_ROW_THRESHOLD = 5
 LARGE_TABLE_COLUMN_THRESHOLD = 4
@@ -76,6 +76,7 @@ def _render_section(
     citations: list[CitationRecord] = []
     figure_count = 0
     table_count = 0
+    equation_count = 0
 
     for block in section.blocks:
         if isinstance(block, ParagraphBlock):
@@ -112,6 +113,12 @@ def _render_section(
                 lines.extend([r"\input{" + include_path.as_posix() + "}", ""])
             else:
                 lines.extend([rendered_table.rstrip(), ""])
+            continue
+
+        if isinstance(block, EquationBlock):
+            equation_count += 1
+            equation_label = _build_equation_label(section, block, equation_count)
+            lines.extend(_render_equation(block, equation_label))
 
     return "\n".join(lines).rstrip() + "\n", created_table_files, citations
 
@@ -149,6 +156,21 @@ def _build_table_label(section: Section, block: TableBlock, table_count: int) ->
     return f"tab:{section.slug}_{slugify(source, fallback=f'table_{table_count}')}"
 
 
+def _build_equation_label(section: Section, block: EquationBlock, equation_count: int) -> str:
+    source = block.latex or block.source_text or f"{section.title} equation {equation_count}"
+    return f"eq:{section.slug}_{slugify(source, fallback=f'equation_{equation_count}')}"
+
+
+def _render_equation(block: EquationBlock, label: str) -> list[str]:
+    lines = [r"\begin{equation}"]
+    if block.latex is None:
+        lines.append(r"% TODO: Equation could not be converted")
+    else:
+        lines.append(block.latex)
+    lines.extend([r"\label{" + label + "}", r"\end{equation}", ""])
+    return lines
+
+
 def _render_text_with_citations(text: str) -> tuple[str, list[CitationRecord]]:
     converted, citations = convert_text_citations(text)
     parts = converted.split("\\")
@@ -176,6 +198,7 @@ def _render_preamble() -> str:
             r"\usepackage[utf8]{inputenc}",
             r"\usepackage[T1]{fontenc}",
             r"\usepackage{natbib}",
+            r"\usepackage{amsmath}",
             "",
         ]
     )

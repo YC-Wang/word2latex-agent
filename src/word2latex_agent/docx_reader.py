@@ -1,4 +1,4 @@
-"""Read ordered paragraph and table content from DOCX files."""
+"""Read ordered paragraph, table, and equation content from DOCX files."""
 
 from __future__ import annotations
 
@@ -6,13 +6,16 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
 
-from .models import FigureBlock, ParagraphBlock, Section, SectionContent, TableBlock
+from .models import EquationBlock, FigureBlock, ParagraphBlock, Section, SectionContent, TableBlock
 
-WORD_NAMESPACE = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+WORD_NAMESPACE = {
+    "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    "m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
+}
 
 
 def read_docx_blocks(path: str | Path) -> list[SectionContent]:
-    """Extract ordered paragraph, figure-caption, and table blocks from a DOCX file."""
+    """Extract ordered paragraph, figure-caption, table, and equation blocks from a DOCX file."""
     source = Path(path)
     with ZipFile(source) as archive:
         document_xml = archive.read("word/document.xml")
@@ -33,8 +36,17 @@ def read_docx_blocks(path: str | Path) -> list[SectionContent]:
         local_name = _local_name(child.tag)
 
         if local_name == "p":
-            paragraph = _parse_paragraph(child, style_map)
-            if paragraph is None:
+            paragraph_blocks = _parse_paragraph_blocks(child, style_map)
+            if not paragraph_blocks:
+                continue
+
+            if len(paragraph_blocks) == 1 and isinstance(paragraph_blocks[0], ParagraphBlock):
+                paragraph = paragraph_blocks[0]
+            else:
+                if pending_table_caption is not None:
+                    blocks.append(ParagraphBlock(text=pending_table_caption, style="Normal"))
+                    pending_table_caption = None
+                blocks.extend(paragraph_blocks)
                 continue
 
             if _is_heading(paragraph.style):
@@ -117,15 +129,28 @@ def _find_paragraph_style_id(paragraph: ET.Element) -> str | None:
     return style.attrib.get(f"{{{WORD_NAMESPACE['w']}}}val")
 
 
-def _parse_paragraph(paragraph: ET.Element, style_map: dict[str, str]) -> ParagraphBlock | None:
-    text_parts = [node.text or "" for node in paragraph.findall(".//w:t", WORD_NAMESPACE)]
-    text = "".join(text_parts).strip()
-    if not text:
-        return None
-
+def _parse_paragraph_blocks(
+    paragraph: ET.Element, style_map: dict[str, str]
+) -> list[SectionContent]:
     style_id = _find_paragraph_style_id(paragraph)
     style_name = style_map.get(style_id, style_id or "Normal")
-    return ParagraphBlock(text=text, style=style_name)
+    blocks: list[SectionContent] = []
+    buffered_text: list[str] = []
+
+    for child in list(paragraph):
+        local_name = _local_name(child.tag)
+        if local_name == "r":
+            buffered_text.extend(node.text or "" for node in child.findall(".//w:t", WORD_NAMESPACE))
+            continue
+        if local_name in {"oMath", "oMathPara"}:
+            _flush_text_block(buffered_text, style_name, blocks)
+            blocks.append(_parse_equation_block(child))
+            continue
+
+        buffered_text.extend(node.text or "" for node in child.findall(".//w:t", WORD_NAMESPACE))
+
+    _flush_text_block(buffered_text, style_name, blocks)
+    return blocks
 
 
 def _parse_table(table: ET.Element, caption: str | None) -> TableBlock:
@@ -148,6 +173,75 @@ def _detect_caption_kind(text: str) -> str | None:
     if lowered.startswith("table"):
         return "table"
     return None
+
+
+def _parse_equation_block(node: ET.Element) -> EquationBlock:
+    math_node = node.find(".//m:oMath", WORD_NAMESPACE) if _local_name(node.tag) == "oMathPara" else node
+    if math_node is None:
+        source_text = "".join(text or "" for text in node.itertext()).strip()
+        return EquationBlock(latex=None, source_text=source_text or "equation")
+
+    latex = _convert_omml_to_latex(math_node)
+    source_text = "".join(text or "" for text in math_node.itertext()).strip()
+    return EquationBlock(latex=latex, source_text=source_text or "equation")
+
+
+def _convert_omml_to_latex(node: ET.Element) -> str | None:
+    parts: list[str] = []
+    for child in list(node):
+        converted = _convert_math_element(child)
+        if converted is None:
+            return None
+        parts.append(converted)
+    return "".join(parts).strip() or None
+
+
+def _convert_math_element(node: ET.Element) -> str | None:
+    local_name = _local_name(node.tag)
+    if local_name == "r":
+        return "".join(text_node.text or "" for text_node in node.findall(".//m:t", WORD_NAMESPACE))
+    if local_name == "f":
+        numerator = node.find("./m:num/*", WORD_NAMESPACE)
+        denominator = node.find("./m:den/*", WORD_NAMESPACE)
+        if numerator is None or denominator is None:
+            return None
+        numerator_text = _convert_omml_to_latex(numerator) if _local_name(numerator.tag) == "oMath" else _convert_math_element(numerator)
+        denominator_text = _convert_omml_to_latex(denominator) if _local_name(denominator.tag) == "oMath" else _convert_math_element(denominator)
+        if numerator_text is None or denominator_text is None:
+            return None
+        return rf"\frac{{{numerator_text}}}{{{denominator_text}}}"
+    if local_name == "sSup":
+        base = node.find("./m:e/*", WORD_NAMESPACE)
+        superscript = node.find("./m:sup/*", WORD_NAMESPACE)
+        if base is None or superscript is None:
+            return None
+        base_text = _convert_omml_to_latex(base) if _local_name(base.tag) == "oMath" else _convert_math_element(base)
+        superscript_text = _convert_omml_to_latex(superscript) if _local_name(superscript.tag) == "oMath" else _convert_math_element(superscript)
+        if base_text is None or superscript_text is None:
+            return None
+        return rf"{base_text}^{{{superscript_text}}}"
+    if local_name == "sSub":
+        base = node.find("./m:e/*", WORD_NAMESPACE)
+        subscript = node.find("./m:sub/*", WORD_NAMESPACE)
+        if base is None or subscript is None:
+            return None
+        base_text = _convert_omml_to_latex(base) if _local_name(base.tag) == "oMath" else _convert_math_element(base)
+        subscript_text = _convert_omml_to_latex(subscript) if _local_name(subscript.tag) == "oMath" else _convert_math_element(subscript)
+        if base_text is None or subscript_text is None:
+            return None
+        return rf"{base_text}_{{{subscript_text}}}"
+    if local_name == "oMath":
+        return _convert_omml_to_latex(node)
+    return None
+
+
+def _flush_text_block(
+    buffered_text: list[str], style_name: str, blocks: list[SectionContent]
+) -> None:
+    text = "".join(buffered_text).strip()
+    buffered_text.clear()
+    if text:
+        blocks.append(ParagraphBlock(text=text, style=style_name))
 
 
 def _is_heading(style_name: str) -> bool:

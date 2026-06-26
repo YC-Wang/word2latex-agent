@@ -30,7 +30,15 @@ class TableBlock:
     caption: str | None = None
 
 
-SectionContent: TypeAlias = ParagraphBlock | FigureBlock | TableBlock
+@dataclass(slots=True)
+class EquationBlock:
+    """Represents a displayed equation extracted from OMML."""
+
+    latex: str | None
+    source_text: str
+
+
+SectionContent: TypeAlias = ParagraphBlock | FigureBlock | TableBlock | EquationBlock
 
 
 @dataclass(frozen=True, slots=True)

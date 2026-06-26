@@ -8,7 +8,8 @@ from zipfile import ZipFile
 
 ParagraphFixture: TypeAlias = tuple[str, str]
 TableFixture: TypeAlias = dict[str, list[list[str]]]
-DocxFixtureBlock: TypeAlias = ParagraphFixture | TableFixture
+EquationFixture: TypeAlias = dict[str, object]
+DocxFixtureBlock: TypeAlias = ParagraphFixture | TableFixture | EquationFixture
 
 CONTENT_TYPES_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -61,6 +62,10 @@ def _build_document_xml(blocks: list[DocxFixtureBlock]) -> str:
             )
             continue
 
+        if "equation" in block:
+            body.append(_build_equation_paragraph(block["equation"]))
+            continue
+
         rows = block.get("rows", [])
         cells_xml: list[str] = []
         for row in rows:
@@ -88,4 +93,52 @@ def _escape_xml(text: str) -> str:
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
+    )
+
+
+def _build_equation_paragraph(equation: object) -> str:
+    if not isinstance(equation, dict):
+        raise TypeError("equation fixture must be a dictionary")
+
+    kind = equation.get("kind", "text")
+    if kind == "text":
+        value = _escape_xml(str(equation.get("value", "")))
+        math_xml = (
+            '<m:oMath>'
+            '<m:r><m:t>' + value + "</m:t></m:r>"
+            "</m:oMath>"
+        )
+    elif kind == "fraction":
+        numerator = _escape_xml(str(equation.get("numerator", "")))
+        denominator = _escape_xml(str(equation.get("denominator", "")))
+        math_xml = (
+            '<m:oMath>'
+            "<m:f>"
+            "<m:num><m:r><m:t>" + numerator + "</m:t></m:r></m:num>"
+            "<m:den><m:r><m:t>" + denominator + "</m:t></m:r></m:den>"
+            "</m:f>"
+            "</m:oMath>"
+        )
+    elif kind == "superscript":
+        base = _escape_xml(str(equation.get("base", "")))
+        superscript = _escape_xml(str(equation.get("sup", "")))
+        math_xml = (
+            '<m:oMath>'
+            "<m:sSup>"
+            "<m:e><m:r><m:t>" + base + "</m:t></m:r></m:e>"
+            "<m:sup><m:r><m:t>" + superscript + "</m:t></m:r></m:sup>"
+            "</m:sSup>"
+            "</m:oMath>"
+        )
+    else:
+        math_xml = (
+            '<m:oMath>'
+            "<m:nary><m:e><m:r><m:t>unsupported</m:t></m:r></m:e></m:nary>"
+            "</m:oMath>"
+        )
+
+    return (
+        '<w:p xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">'
+        + math_xml
+        + "</w:p>"
     )
