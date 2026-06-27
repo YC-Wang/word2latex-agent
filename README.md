@@ -14,7 +14,8 @@ copy per manuscript, place the Word file at `input/report.docx`, and run
 - extracts embedded DOCX images into `figures/` and emits LaTeX figure environments
 - matches nearby figure captions when possible and falls back to `TODO: Add caption`
 - converts simple author-year citations into `natbib` commands
-- generates `references.bib` with placeholder BibTeX entries
+- parses a trailing References/Bibliography section into best-effort BibTeX entries
+- falls back to placeholder BibTeX entries for citations that are not matched to parsed references
 - writes an Overleaf-ready `preamble.tex` with common document packages
 - detects OMML equations and converts simple displayed equations to LaTeX
 - preserves unsupported equations with a clear TODO placeholder
@@ -310,7 +311,14 @@ Failure handling:
 - Supported citation forms include `(Wang et al., 2024)`, `Wang et al. (2024)`,
   and multi-citations such as `(Coppola et al., 2021; Davolio et al., 2016)`.
 - Citation keys are generated as lowercase `lastname + year`, such as `wang2024`.
-- `references.bib` currently contains placeholder BibTeX entries only.
+- If the manuscript includes a `References` or `Bibliography` section, the agent
+  attempts to parse lines in the form `Authors, YEAR: Title. Journal, Volume, pages.`
+  into BibTeX entries with `author`, `title`, `journal`, `year`, `volume`, and `pages`.
+- Climate-style `and Coauthors` text is normalized to BibTeX-friendly `and others`.
+- Generated bibliography keys are stable best-effort keys such as `hersbach2020era5`.
+- Page ranges are normalized from forms like `1999-2049` to `1999--2049`.
+- If a reference item cannot be parsed, the agent still falls back to placeholder
+  BibTeX entries for unmatched in-text citations.
 - `QA_REPORT.md` is generated only when the checker is run.
 - If a document starts with body text before any heading, that content is placed
   into a default `Introduction` section.

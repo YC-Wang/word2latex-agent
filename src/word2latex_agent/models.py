@@ -53,11 +53,24 @@ SectionContent: TypeAlias = ParagraphBlock | FigureBlock | TableBlock | Equation
 
 @dataclass(frozen=True, slots=True)
 class CitationRecord:
-    """Represents a detected citation and its placeholder bibliography entry."""
+    """Represents a detected author-year citation in body text."""
 
     key: str
     author_token: str
     year: str
+
+
+@dataclass(frozen=True, slots=True)
+class BibliographyEntry:
+    """Represents a parsed bibliography entry ready for BibTeX rendering."""
+
+    key: str
+    author: str
+    title: str
+    journal: str
+    year: str
+    volume: str | None = None
+    pages: str | None = None
 
 
 @dataclass(slots=True)

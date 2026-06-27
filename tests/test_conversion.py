@@ -8,9 +8,9 @@ import unittest
 from unittest.mock import patch
 
 from word2latex_agent import WordToLatexAgent
-from word2latex_agent.citations import convert_text_citations
+from word2latex_agent.citations import build_reference_lookup, convert_text_citations, parse_reference_line
 from word2latex_agent.cli import WORKFLOW_TARGET, build_parser, main as cli_main
-from word2latex_agent.docx_reader import read_docx_blocks, read_docx_paragraphs, split_into_sections
+from word2latex_agent.docx_reader import extract_reference_section, read_docx_blocks, read_docx_paragraphs, split_into_sections
 from word2latex_agent.models import EquationBlock, FigureBlock, ImageBlock, QAIssue, QAResult, TableBlock
 from word2latex_agent.overleaf_sync import SyncResult
 from word2latex_agent.overleaf_sync import OverleafSyncError, sync_to_overleaf
@@ -202,6 +202,79 @@ class ConversionTests(unittest.TestCase):
             self.assertIn("@article{coppola2021,", bibliography)
             self.assertIn("@article{davolio2016,", bibliography)
 
+    def test_reference_line_parses_into_bibtex_fields(self) -> None:
+        entry = parse_reference_line(
+            "Hersbach, H., and Coauthors, 2020: The ERA5 global reanalysis. "
+            "Quarterly Journal of the Royal Meteorological Society, 146, 1999-2049."
+        )
+
+        self.assertIsNotNone(entry)
+        assert entry is not None
+        self.assertEqual(entry.key, "hersbach2020era5")
+        self.assertEqual(entry.author, "Hersbach, H. and others")
+        self.assertEqual(entry.title, "The ERA5 global reanalysis")
+        self.assertEqual(entry.journal, "Quarterly Journal of the Royal Meteorological Society")
+        self.assertEqual(entry.year, "2020")
+        self.assertEqual(entry.volume, "146")
+        self.assertEqual(entry.pages, "1999--2049")
+
+    def test_reference_section_is_extracted_from_body_sections(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "sample.docx"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Introduction"),
+                    ("Normal", "See Hersbach et al. (2020)."),
+                    ("Heading1", "References"),
+                    (
+                        "Normal",
+                        "Hersbach, H., and Coauthors, 2020: The ERA5 global reanalysis. "
+                        "Quarterly Journal of the Royal Meteorological Society, 146, 1999-2049.",
+                    ),
+                ],
+            )
+
+            sections, reference_lines = extract_reference_section(
+                split_into_sections(read_docx_blocks(source))
+            )
+
+            self.assertEqual([section.title for section in sections], ["Introduction"])
+            self.assertEqual(len(reference_lines), 1)
+            self.assertIn("The ERA5 global reanalysis", reference_lines[0])
+
+    def test_reference_section_generates_bibtex_and_resolves_citation_keys(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Introduction"),
+                    ("Normal", "See Hersbach et al. (2020) for details."),
+                    ("Heading1", "References"),
+                    (
+                        "Normal",
+                        "Hersbach, H., and Coauthors, 2020: The ERA5 global reanalysis. "
+                        "Quarterly Journal of the Royal Meteorological Society, 146, 1999-2049.",
+                    ),
+                ],
+            )
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            section_tex = result.section_files[0].read_text(encoding="utf-8")
+            bibliography = result.bibliography_path.read_text(encoding="utf-8")
+
+            self.assertIn(r"\citet{hersbach2020era5}", section_tex)
+            self.assertNotIn(r"\section{References}", section_tex)
+            self.assertIn("@article{hersbach2020era5,", bibliography)
+            self.assertIn("author = {Hersbach, H. and others}", bibliography)
+            self.assertIn("title = {The ERA5 global reanalysis}", bibliography)
+            self.assertIn("journal = {Quarterly Journal of the Royal Meteorological Society}", bibliography)
+            self.assertIn("volume = {146}", bibliography)
+            self.assertIn("pages = {1999--2049}", bibliography)
+
     def test_convert_text_citations_handles_supported_patterns(self) -> None:
         converted, citations = convert_text_citations(
             "See (Wang et al., 2024), Wang et al. (2024), and (Coppola et al., 2021; Davolio et al., 2016)."
@@ -214,6 +287,25 @@ class ConversionTests(unittest.TestCase):
             sorted(citation.key for citation in citations),
             ["coppola2021", "davolio2016", "wang2024"],
         )
+
+    def test_convert_text_citations_uses_reference_lookup_when_available(self) -> None:
+        entry = parse_reference_line(
+            "Hersbach, H., and Coauthors, 2020: The ERA5 global reanalysis. "
+            "Quarterly Journal of the Royal Meteorological Society, 146, 1999-2049."
+        )
+        self.assertIsNotNone(entry)
+        assert entry is not None
+        lookup = build_reference_lookup(
+            [entry]
+        )
+        converted, citations = convert_text_citations(
+            "See Hersbach et al. (2020) and (Hersbach et al., 2020).",
+            lookup,
+        )
+
+        self.assertIn(r"\citet{hersbach2020era5}", converted)
+        self.assertIn(r"\citep{hersbach2020era5}", converted)
+        self.assertEqual([citation.key for citation in citations], ["hersbach2020era5"])
 
     def test_detects_equations_from_omml(self) -> None:
         with TemporaryDirectory() as temp_dir:

@@ -8,6 +8,8 @@ from zipfile import ZipFile
 
 from .models import EquationBlock, FigureBlock, ImageBlock, ParagraphBlock, Section, SectionContent, TableBlock
 
+REFERENCE_SECTION_TITLES = {"references", "bibliography"}
+
 WORD_NAMESPACE = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
     "m": "http://schemas.openxmlformats.org/officeDocument/2006/math",
@@ -129,6 +131,26 @@ def split_into_sections(blocks: list[SectionContent]) -> list[Section]:
         sections.append(current)
 
     return sections
+
+
+def extract_reference_section(sections: list[Section]) -> tuple[list[Section], list[str]]:
+    """Split off a trailing References/Bibliography section when present."""
+    if not sections:
+        return [], []
+
+    last_section = sections[-1]
+    if last_section.title.strip().lower() not in REFERENCE_SECTION_TITLES:
+        return sections, []
+
+    reference_lines = [
+        block.text.strip()
+        for block in last_section.blocks
+        if isinstance(block, ParagraphBlock) and block.text.strip()
+    ]
+    content_sections = sections[:-1]
+    if not content_sections:
+        content_sections = [Section(title="Introduction")]
+    return content_sections, reference_lines
 
 
 def read_docx_paragraphs(path: str | Path) -> list[ParagraphBlock]:

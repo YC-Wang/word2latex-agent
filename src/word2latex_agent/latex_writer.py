@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .citations import convert_text_citations, render_bibliography
-from .models import CitationRecord, EquationBlock, FigureBlock, ImageBlock, ParagraphBlock, Section, TableBlock, slugify
+from .citations import build_reference_lookup, convert_text_citations, render_bibliography
+from .models import BibliographyEntry, CitationRecord, EquationBlock, FigureBlock, ImageBlock, ParagraphBlock, Section, TableBlock, slugify
 from .template_manager import load_template, render_template
 
 LARGE_TABLE_ROW_THRESHOLD = 5
@@ -17,6 +17,7 @@ def write_project(
     output_dir: str | Path,
     sections: list[Section],
     config: dict[str, object],
+    bibliography_entries: list[BibliographyEntry] | None = None,
 ) -> tuple[Path, list[Path], list[Path], list[Path], Path, Path, int]:
     """Write `main.tex` and section files into the output directory."""
     template_name = str(config.get("template", "generic_article"))
@@ -33,10 +34,16 @@ def write_project(
     table_files: list[Path] = []
     figure_files: list[Path] = []
     all_citations: list[CitationRecord] = []
+    reference_lookup = build_reference_lookup(bibliography_entries or [])
     for index, section in enumerate(sections, start=1):
         section_path = sections_dir / f"section_{index:02d}_{section.slug}.tex"
         section_text, created_table_files, created_figure_files, citations = _render_section(
-            section, index, tables_dir, figures_dir, len(figure_files)
+            section,
+            index,
+            tables_dir,
+            figures_dir,
+            len(figure_files),
+            reference_lookup,
         )
         section_path.write_text(section_text, encoding="utf-8")
         section_files.append(section_path)
@@ -47,7 +54,10 @@ def write_project(
     preamble_path = root / "preamble.tex"
     preamble_path.write_text(_render_preamble(template_definition), encoding="utf-8")
     bibliography_path = root / "references.bib"
-    bibliography_path.write_text(render_bibliography(all_citations), encoding="utf-8")
+    bibliography_path.write_text(
+        render_bibliography(all_citations, bibliography_entries or []),
+        encoding="utf-8",
+    )
     main_tex = root / "main.tex"
     main_tex.write_text(_render_main(config, section_files, template_definition), encoding="utf-8")
     citation_count = len({citation.key for citation in all_citations})
@@ -109,7 +119,12 @@ def _render_main(
 
 
 def _render_section(
-    section: Section, section_index: int, tables_dir: Path, figures_dir: Path, figure_offset: int
+    section: Section,
+    section_index: int,
+    tables_dir: Path,
+    figures_dir: Path,
+    figure_offset: int,
+    citation_key_lookup: dict[tuple[str, str], str],
 ) -> tuple[str, list[Path], list[Path], list[CitationRecord]]:
     lines = [r"\section{" + _escape_latex(section.title) + "}"]
     created_table_files: list[Path] = []
@@ -121,7 +136,10 @@ def _render_section(
 
     for block in section.blocks:
         if isinstance(block, ParagraphBlock):
-            rendered_text, paragraph_citations = _render_text_with_citations(block.text)
+            rendered_text, paragraph_citations = _render_text_with_citations(
+                block.text,
+                citation_key_lookup,
+            )
             citations.extend(paragraph_citations)
             lines.extend([rendered_text, ""])
             continue
@@ -239,8 +257,11 @@ def _render_equation(block: EquationBlock, label: str) -> list[str]:
     return lines
 
 
-def _render_text_with_citations(text: str) -> tuple[str, list[CitationRecord]]:
-    converted, citations = convert_text_citations(text)
+def _render_text_with_citations(
+    text: str,
+    citation_key_lookup: dict[tuple[str, str], str],
+) -> tuple[str, list[CitationRecord]]:
+    converted, citations = convert_text_citations(text, citation_key_lookup)
     parts = converted.split("\\")
     if not parts:
         return "", citations

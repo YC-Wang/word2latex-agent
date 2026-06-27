@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .citations import parse_reference_entries
 from .config import load_config
-from .docx_reader import read_docx_blocks, split_into_sections
+from .docx_reader import extract_reference_section, read_docx_blocks, split_into_sections
 from .latex_writer import write_project
 from .models import ConversionResult, FigureBlock, ImageBlock, TableBlock
 
@@ -32,7 +33,8 @@ class WordToLatexAgent:
         destination = Path(output_dir)
 
         blocks = read_docx_blocks(source)
-        sections = split_into_sections(blocks)
+        sections, reference_lines = extract_reference_section(split_into_sections(blocks))
+        bibliography_entries = parse_reference_entries(reference_lines)
         (
             main_tex_path,
             section_files,
@@ -42,7 +44,10 @@ class WordToLatexAgent:
             preamble_path,
             citation_count,
         ) = write_project(
-            destination, sections, self.config
+            destination,
+            sections,
+            self.config,
+            bibliography_entries,
         )
 
         table_count = sum(isinstance(block, TableBlock) for block in blocks)
