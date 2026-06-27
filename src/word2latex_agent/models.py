@@ -78,11 +78,23 @@ class Section:
     """Represents a logical section in the generated LaTeX project."""
 
     title: str
+    level: int = 1
     blocks: list[SectionContent] = field(default_factory=list)
 
     @property
     def slug(self) -> str:
         return slugify(self.title, fallback="section")
+
+
+@dataclass(slots=True)
+class FrontMatter:
+    """Represents detected manuscript front matter."""
+
+    title: str | None = None
+    authors: list[str] = field(default_factory=list)
+    affiliations: list[str] = field(default_factory=list)
+    abstract: list[str] = field(default_factory=list)
+    keywords: str | None = None
 
 
 def slugify(text: str, fallback: str) -> str:

@@ -22,6 +22,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "latex": {
         "include_toc": True,
     },
+    "section_splitting": {
+        "split_level": "section",
+    },
     "overleaf": {
         "enabled": False,
         "project_id": "",

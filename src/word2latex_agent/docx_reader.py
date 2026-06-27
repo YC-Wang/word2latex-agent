@@ -2,13 +2,43 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
 
-from .models import EquationBlock, FigureBlock, ImageBlock, ParagraphBlock, Section, SectionContent, TableBlock
+from .models import EquationBlock, FigureBlock, FrontMatter, ImageBlock, ParagraphBlock, Section, SectionContent, TableBlock
 
-REFERENCE_SECTION_TITLES = {"references", "bibliography"}
+REFERENCE_SECTION_TITLES = {"reference", "references", "bibliography"}
+TEXT_HEADING_TITLES = {
+    "abstract",
+    "acknowledgments",
+    "acknowledgements",
+    "reference",
+    "references",
+    "bibliography",
+    "tables",
+    "figures",
+    "supplementary",
+}
+NUMBERED_HEADING_PATTERN = r"^\d+(?:\.\d+)*\.?\s+\S+"
+FIGURE_CAPTION_PATTERN = r"^(?:figure|fig\.)\s+[a-z0-9]+(?:[\s.:].*)?$"
+TABLE_CAPTION_PATTERN = r"^table\s+[a-z0-9]+(?:[\s.:].*)?$"
+BIBLIOGRAPHY_STYLE_TOKEN = "bibliography"
+TITLE_HEADING_TITLES = {"abstract", "acknowledgments", "acknowledgements", "tables", "figures", "supplementary"}
+KEYWORDS_PREFIXES = ("keywords:", "keyword:", "key words:")
+AFFILIATION_HINTS = (
+    "university",
+    "institute",
+    "department",
+    "administration",
+    "center",
+    "centre",
+    "laboratory",
+    "academy",
+    "academia",
+    "school",
+)
 
 WORD_NAMESPACE = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
@@ -64,7 +94,7 @@ def read_docx_blocks(path: str | Path) -> list[SectionContent]:
                 pending_figure_caption = None
                 continue
 
-            if _is_heading(paragraph.style):
+            if _is_heading_paragraph(paragraph):
                 if pending_table_caption is not None:
                     blocks.append(ParagraphBlock(text=pending_table_caption, style="Normal"))
                     pending_table_caption = None
@@ -114,15 +144,19 @@ def read_docx_blocks(path: str | Path) -> list[SectionContent]:
 
 
 def split_into_sections(blocks: list[SectionContent]) -> list[Section]:
-    """Group ordered content into sections based on heading paragraphs."""
+    """Group ordered content into sections based on detected heading levels."""
     sections: list[Section] = []
-    current = Section(title="Introduction")
+    current = Section(title="Introduction", level=1)
 
     for block in blocks:
-        if isinstance(block, ParagraphBlock) and _is_heading(block.style):
+        if isinstance(block, ParagraphBlock):
+            heading_level = _detect_heading_level(block)
+        else:
+            heading_level = None
+        if heading_level is not None:
             if current.blocks or current.title != "Introduction":
                 sections.append(current)
-            current = Section(title=block.text)
+            current = Section(title=_clean_heading_title(block.text), level=heading_level)
             continue
 
         current.blocks.append(block)
@@ -134,23 +168,87 @@ def split_into_sections(blocks: list[SectionContent]) -> list[Section]:
 
 
 def extract_reference_section(sections: list[Section]) -> tuple[list[Section], list[str]]:
-    """Split off a trailing References/Bibliography section when present."""
+    """Split off References/Bibliography content when present."""
     if not sections:
         return [], []
 
-    last_section = sections[-1]
-    if last_section.title.strip().lower() not in REFERENCE_SECTION_TITLES:
-        return sections, []
+    reference_lines: list[str] = []
+    content_sections: list[Section] = []
 
-    reference_lines = [
-        block.text.strip()
-        for block in last_section.blocks
-        if isinstance(block, ParagraphBlock) and block.text.strip()
-    ]
-    content_sections = sections[:-1]
+    for section in sections:
+        if _is_reference_section_title(section.title):
+            reference_lines.extend(_collect_reference_lines(section.blocks))
+            continue
+
+        filtered_blocks: list[SectionContent] = []
+        for block in section.blocks:
+            if isinstance(block, ParagraphBlock) and _is_bibliography_paragraph(block):
+                normalized = _normalize_reference_line(block.text)
+                if normalized:
+                    reference_lines.append(normalized)
+                continue
+            filtered_blocks.append(block)
+        if filtered_blocks or not content_sections:
+            content_sections.append(Section(title=section.title, level=section.level, blocks=filtered_blocks))
+
     if not content_sections:
         content_sections = [Section(title="Introduction")]
-    return content_sections, reference_lines
+    return content_sections, _deduplicate_preserving_order(reference_lines)
+
+
+def extract_front_matter(blocks: list[SectionContent]) -> tuple[FrontMatter, list[SectionContent]]:
+    """Detect title/authors/affiliations/abstract/keywords ahead of the body."""
+    front_matter = FrontMatter()
+    body_start = 0
+    preamble_blocks: list[ParagraphBlock] = []
+
+    for index, block in enumerate(blocks):
+        if not isinstance(block, ParagraphBlock):
+            break
+        if _is_body_start_paragraph(block):
+            body_start = index
+            break
+        preamble_blocks.append(block)
+    else:
+        body_start = len(preamble_blocks)
+
+    leading_index = 0
+    if preamble_blocks:
+        first_text = preamble_blocks[0].text.strip()
+        if first_text and first_text.lower() not in TEXT_HEADING_TITLES:
+            front_matter.title = first_text
+            leading_index = 1
+
+    abstract_index = _find_special_heading_index(preamble_blocks, "abstract")
+    keywords_index = _find_keywords_index(preamble_blocks)
+
+    metadata_end = len(preamble_blocks)
+    if abstract_index is not None:
+        metadata_end = min(metadata_end, abstract_index)
+    if keywords_index is not None:
+        metadata_end = min(metadata_end, keywords_index)
+
+    metadata_blocks = preamble_blocks[leading_index:metadata_end]
+    front_matter.authors, front_matter.affiliations = _split_author_metadata(metadata_blocks)
+
+    if abstract_index is not None:
+        abstract_end = len(preamble_blocks)
+        if keywords_index is not None and keywords_index > abstract_index:
+            abstract_end = keywords_index
+        for block in preamble_blocks[abstract_index + 1 : abstract_end]:
+            text = block.text.strip()
+            if text:
+                front_matter.abstract.append(text)
+
+    if keywords_index is not None:
+        front_matter.keywords = _extract_keywords(preamble_blocks[keywords_index].text)
+
+    remaining_blocks = blocks[body_start:]
+    if abstract_index is not None or keywords_index is not None:
+        remove_indexes = set(range(0, body_start))
+        remaining_blocks = [block for index, block in enumerate(blocks) if index not in remove_indexes]
+
+    return front_matter, remaining_blocks
 
 
 def read_docx_paragraphs(path: str | Path) -> list[ParagraphBlock]:
@@ -228,9 +326,11 @@ def _parse_table(table: ET.Element, caption: str | None) -> TableBlock:
 
 def _detect_caption_kind(text: str) -> str | None:
     lowered = text.strip().lower()
-    if lowered.startswith("figure") or lowered.startswith("fig."):
+    if lowered in TEXT_HEADING_TITLES:
+        return None
+    if _matches_text_pattern(lowered, FIGURE_CAPTION_PATTERN):
         return "figure"
-    if lowered.startswith("table"):
+    if _matches_text_pattern(lowered, TABLE_CAPTION_PATTERN):
         return "table"
     return None
 
@@ -366,6 +466,164 @@ def _flush_pending_figure_caption(
 def _is_heading(style_name: str) -> bool:
     lowered = style_name.lower()
     return lowered.startswith("heading")
+
+
+def _is_heading_paragraph(paragraph: ParagraphBlock) -> bool:
+    return _detect_heading_level(paragraph) is not None
+
+
+def _looks_like_heading_text(text: str) -> bool:
+    stripped = text.strip()
+    lowered = stripped.lower()
+    if lowered in TEXT_HEADING_TITLES:
+        return True
+    return _matches_text_pattern(stripped, NUMBERED_HEADING_PATTERN)
+
+
+def _detect_heading_level(paragraph: ParagraphBlock) -> int | None:
+    style_level = _heading_level_from_style(paragraph.style)
+    if style_level is not None:
+        return style_level
+
+    stripped = paragraph.text.strip()
+    lowered = stripped.lower()
+    if lowered in TITLE_HEADING_TITLES or lowered in REFERENCE_SECTION_TITLES:
+        return 1
+    numbering_level = _heading_level_from_text(stripped)
+    if numbering_level is not None:
+        return numbering_level
+    return None
+
+
+def _heading_level_from_style(style_name: str) -> int | None:
+    lowered = style_name.lower().replace(" ", "")
+    match = re.match(r"heading(?P<level>\d+)", lowered)
+    if match is None:
+        return None
+    return int(match.group("level"))
+
+
+def _heading_level_from_text(text: str) -> int | None:
+    match = re.match(r"^(?P<numbering>\d+(?:\.\d+)*)\.?\s+\S+", text)
+    if match is None:
+        return None
+    return match.group("numbering").count(".") + 1
+
+
+def _clean_heading_title(text: str) -> str:
+    stripped = text.strip()
+    return re.sub(r"^\d+(?:\.\d+)*\.?\s+", "", stripped)
+
+
+def _is_reference_section_title(title: str) -> bool:
+    return title.strip().lower() in REFERENCE_SECTION_TITLES
+
+
+def _is_bibliography_paragraph(paragraph: ParagraphBlock) -> bool:
+    return BIBLIOGRAPHY_STYLE_TOKEN in paragraph.style.lower()
+
+
+def _collect_reference_lines(blocks: list[SectionContent]) -> list[str]:
+    lines: list[str] = []
+    for block in blocks:
+        if not isinstance(block, ParagraphBlock):
+            continue
+        normalized = _normalize_reference_line(block.text)
+        if normalized:
+            lines.append(normalized)
+    return lines
+
+
+def _normalize_reference_line(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        return ""
+    lowered = stripped.lower()
+    if lowered in REFERENCE_SECTION_TITLES:
+        return ""
+    for prefix in ("bibliography ", "references ", "reference "):
+        if lowered.startswith(prefix):
+            return stripped[len(prefix):].strip()
+    return stripped
+
+
+def _is_body_start_paragraph(paragraph: ParagraphBlock) -> bool:
+    text = paragraph.text.strip()
+    lowered = text.lower()
+    if lowered in {"abstract"}:
+        return False
+    if _is_heading_paragraph(paragraph):
+        return True
+    if _matches_keywords_prefix(lowered):
+        return False
+    return False
+
+
+def _find_special_heading_index(blocks: list[ParagraphBlock], title: str) -> int | None:
+    for index, block in enumerate(blocks):
+        if block.text.strip().lower() == title:
+            return index
+    return None
+
+
+def _find_keywords_index(blocks: list[ParagraphBlock]) -> int | None:
+    for index, block in enumerate(blocks):
+        if _matches_keywords_prefix(block.text.strip().lower()):
+            return index
+    return None
+
+
+def _matches_keywords_prefix(text: str) -> bool:
+    return any(text.startswith(prefix) for prefix in KEYWORDS_PREFIXES)
+
+
+def _extract_keywords(text: str) -> str:
+    stripped = text.strip()
+    lowered = stripped.lower()
+    for prefix in KEYWORDS_PREFIXES:
+        if lowered.startswith(prefix):
+            return stripped[len(prefix):].strip()
+    return stripped
+
+
+def _split_author_metadata(blocks: list[ParagraphBlock]) -> tuple[list[str], list[str]]:
+    authors: list[str] = []
+    affiliations: list[str] = []
+    for block in blocks:
+        text = block.text.strip()
+        if not text:
+            continue
+        if _looks_like_affiliation(text):
+            affiliations.append(text)
+        else:
+            authors.append(text)
+    return authors, affiliations
+
+
+def _looks_like_affiliation(text: str) -> bool:
+    lowered = text.lower()
+    if any(hint in lowered for hint in AFFILIATION_HINTS):
+        return True
+    if re.match(r"^\d+\s*", text):
+        return True
+    if lowered.startswith("corresponding author"):
+        return True
+    return False
+
+
+def _deduplicate_preserving_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
+
+
+def _matches_text_pattern(text: str, pattern: str) -> bool:
+    return re.match(pattern, text, re.IGNORECASE) is not None
 
 
 def _local_name(tag: str) -> str:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .citations import parse_reference_entries
 from .config import load_config
-from .docx_reader import extract_reference_section, read_docx_blocks, split_into_sections
+from .docx_reader import extract_front_matter, extract_reference_section, read_docx_blocks, split_into_sections
 from .latex_writer import write_project
 from .models import ConversionResult, FigureBlock, ImageBlock, TableBlock
 
@@ -33,7 +33,8 @@ class WordToLatexAgent:
         destination = Path(output_dir)
 
         blocks = read_docx_blocks(source)
-        sections, reference_lines = extract_reference_section(split_into_sections(blocks))
+        front_matter, body_blocks = extract_front_matter(blocks)
+        sections, reference_lines = extract_reference_section(split_into_sections(body_blocks))
         bibliography_entries = parse_reference_entries(reference_lines)
         (
             main_tex_path,
@@ -48,6 +49,7 @@ class WordToLatexAgent:
             sections,
             self.config,
             bibliography_entries,
+            front_matter,
         )
 
         table_count = sum(isinstance(block, TableBlock) for block in blocks)
@@ -65,7 +67,7 @@ class WordToLatexAgent:
             bibliography_path=bibliography_path,
             preamble_path=preamble_path,
             template_name=str(self.config.get("template", "generic_article")),
-            section_count=len(sections),
+            section_count=sum(1 for section in sections if section.level == 1),
             table_count=table_count,
             figure_count=figure_count,
             citation_count=citation_count,

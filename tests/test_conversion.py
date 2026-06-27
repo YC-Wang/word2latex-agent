@@ -11,7 +11,7 @@ from word2latex_agent import WordToLatexAgent
 from word2latex_agent.citations import build_reference_lookup, convert_text_citations, parse_reference_line
 from word2latex_agent.cli import WORKFLOW_TARGET, build_parser, main as cli_main
 from word2latex_agent.docx_reader import extract_reference_section, read_docx_blocks, read_docx_paragraphs, split_into_sections
-from word2latex_agent.models import EquationBlock, FigureBlock, ImageBlock, QAIssue, QAResult, TableBlock
+from word2latex_agent.models import EquationBlock, FigureBlock, ImageBlock, ParagraphBlock, QAIssue, QAResult, Section, TableBlock
 from word2latex_agent.overleaf_sync import SyncResult
 from word2latex_agent.overleaf_sync import OverleafSyncError, sync_to_overleaf
 from word2latex_agent.qa_checker import check_project
@@ -87,7 +87,8 @@ class ConversionTests(unittest.TestCase):
             self.assertIn(r"\author{word2latex-agent}", main_tex)
             self.assertIn(r"\date{\today}", main_tex)
             self.assertIn(r"\maketitle", main_tex)
-            self.assertIn(r"\input{sections/section_01_introduction}", main_tex)
+            self.assertIn(r"\input{sections/01_introduction}", main_tex)
+            self.assertIn(r"\input{sections/02_method}", main_tex)
             self.assertIn(r"\bibliographystyle{plainnat}", main_tex)
             self.assertIn(r"\bibliography{references}", main_tex)
             self.assertIn(r"\end{document}", main_tex)
@@ -275,6 +276,42 @@ class ConversionTests(unittest.TestCase):
             self.assertIn("volume = {146}", bibliography)
             self.assertIn("pages = {1999--2049}", bibliography)
 
+    def test_extract_reference_section_handles_singular_reference_heading_and_bibliography_style(self) -> None:
+        sections, reference_lines = extract_reference_section(
+            [
+                Section(
+                    title="1. Introduction",
+                    blocks=[ParagraphBlock(text="See Hersbach et al. 2020.", style="Normal")],
+                ),
+                Section(
+                    title="Reference",
+                    blocks=[
+                        ParagraphBlock(
+                            text="Hersbach, H., and Coauthors, 2020: The ERA5 global reanalysis. "
+                            "Quarterly Journal of the Royal Meteorological Society, 146, 1999-2049.",
+                            style="Normal",
+                        )
+                    ],
+                ),
+                Section(
+                    title="Supplementary",
+                    blocks=[
+                        ParagraphBlock(
+                            text="Bibliography Chou, C., L.-F. Huang, L. Tseng, J.-Y. Tu, and P.-H. Tan, 2009: "
+                            "Annual Cycle of Rainfall in the Western North Pacific and East Asian Sector. "
+                            "Journal of Climate, 22, 2073-2094.",
+                            style="EndNote Bibliography",
+                        )
+                    ],
+                ),
+            ]
+        )
+
+        self.assertEqual([section.title for section in sections], ["1. Introduction"])
+        self.assertEqual(len(reference_lines), 2)
+        self.assertTrue(reference_lines[0].startswith("Hersbach, H."))
+        self.assertTrue(reference_lines[1].startswith("Chou, C."))
+
     def test_convert_text_citations_handles_supported_patterns(self) -> None:
         converted, citations = convert_text_citations(
             "See (Wang et al., 2024), Wang et al. (2024), and (Coppola et al., 2021; Davolio et al., 2016)."
@@ -306,6 +343,211 @@ class ConversionTests(unittest.TestCase):
         self.assertIn(r"\citet{hersbach2020era5}", converted)
         self.assertIn(r"\citep{hersbach2020era5}", converted)
         self.assertEqual([citation.key for citation in citations], ["hersbach2020era5"])
+
+    def test_convert_text_citations_accepts_optional_comma_and_two_authors(self) -> None:
+        converted, citations = convert_text_citations(
+            "See (Hersbach et al. 2020; Cho and Lu 2017) and Yang and Lo (2023)."
+        )
+
+        self.assertIn(r"\citep{hersbach2020,cho2017}", converted)
+        self.assertIn(r"\citet{yang2023}", converted)
+        self.assertEqual(
+            sorted(citation.key for citation in citations),
+            ["cho2017", "hersbach2020", "yang2023"],
+        )
+
+    def test_numbered_headings_are_detected_from_plain_text(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "sample.docx"
+            make_docx(
+                source,
+                [
+                    ("Normal", "1. Introduction"),
+                    ("Normal", "Opening paragraph."),
+                    ("Normal", "2. Method"),
+                    ("Normal", "Method paragraph."),
+                ],
+            )
+
+            sections = split_into_sections(read_docx_blocks(source))
+
+            self.assertEqual([section.title for section in sections], ["Introduction", "Method"])
+
+    def test_front_matter_abstract_and_keywords_stay_in_main_tex(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Normal", "A Scientific Report Title"),
+                    ("Normal", "Alice Example, Bob Example"),
+                    ("Normal", "1Example University, City"),
+                    ("Normal", "Abstract"),
+                    ("Normal", "This is the abstract paragraph."),
+                    ("Normal", "Keywords: climate, downscaling, latex"),
+                    ("Normal", "1. Introduction"),
+                    ("Normal", "Body paragraph."),
+                ],
+            )
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            main_tex = result.main_tex_path.read_text(encoding="utf-8")
+            section_tex = result.section_files[0].read_text(encoding="utf-8")
+
+            self.assertIn(r"\title{A Scientific Report Title}", main_tex)
+            self.assertIn(r"\author{Alice Example, Bob Example}", main_tex)
+            self.assertIn(r"\begin{abstract}", main_tex)
+            self.assertIn("This is the abstract paragraph.", main_tex)
+            self.assertIn(r"\end{abstract}", main_tex)
+            self.assertIn(r"\textbf{Keywords:} climate, downscaling, latex", main_tex)
+            self.assertIn("1Example University, City", main_tex)
+            self.assertNotIn(r"\begin{abstract}", section_tex)
+            self.assertNotIn("Keywords:", section_tex)
+
+    def test_only_top_level_sections_create_files_by_default(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Normal", "1. Introduction"),
+                    ("Normal", "Intro paragraph."),
+                    ("Normal", "1.1 Background"),
+                    ("Normal", "Background paragraph."),
+                    ("Normal", "2. Results"),
+                    ("Normal", "Results paragraph."),
+                ],
+            )
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            first_section = result.section_files[0].read_text(encoding="utf-8")
+            main_tex = result.main_tex_path.read_text(encoding="utf-8")
+
+            self.assertEqual([path.name for path in result.section_files], ["01_introduction.tex", "02_results.tex"])
+            self.assertIn(r"\input{sections/01_introduction}", main_tex)
+            self.assertIn(r"\input{sections/02_results}", main_tex)
+            self.assertIn(r"\section{Introduction}", first_section)
+            self.assertIn(r"\subsection{Background}", first_section)
+            self.assertIn("Background paragraph.", first_section)
+
+    def test_split_level_subsection_creates_subsection_files(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            config_path = temp_path / "config.yaml"
+            make_docx(
+                source,
+                [
+                    ("Normal", "1. Introduction"),
+                    ("Normal", "Intro paragraph."),
+                    ("Normal", "1.1 Background"),
+                    ("Normal", "Background paragraph."),
+                    ("Normal", "2. Results"),
+                    ("Normal", "Results paragraph."),
+                ],
+            )
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "section_splitting:",
+                        "  split_level: subsection",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = WordToLatexAgent(config_path=config_path).convert(source, output_dir)
+
+            self.assertEqual(
+                [path.name for path in result.section_files],
+                ["01_introduction.tex", "02_background.tex", "03_results.tex"],
+            )
+
+    def test_split_level_none_keeps_body_in_main_tex(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            config_path = temp_path / "config.yaml"
+            make_docx(
+                source,
+                [
+                    ("Normal", "1. Introduction"),
+                    ("Normal", "Intro paragraph."),
+                    ("Normal", "1.1 Background"),
+                    ("Normal", "Background paragraph."),
+                ],
+            )
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "section_splitting:",
+                        "  split_level: none",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            result = WordToLatexAgent(config_path=config_path).convert(source, output_dir)
+            main_tex = result.main_tex_path.read_text(encoding="utf-8")
+
+            self.assertEqual(result.section_files, [])
+            self.assertIn(r"\section{Introduction}", main_tex)
+            self.assertIn(r"\subsection{Background}", main_tex)
+            self.assertNotIn(r"\input{sections/", main_tex)
+
+    def test_figures_heading_is_not_treated_as_caption(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "sample.docx"
+            make_docx(
+                source,
+                [
+                    ("Normal", "Figures"),
+                    {"image": {"filename": "image_1.png", "bytes": b"png"}},
+                    ("Normal", "Figure 1. Proper caption."),
+                ],
+            )
+
+            blocks = read_docx_blocks(source)
+            images = [block for block in blocks if isinstance(block, ImageBlock)]
+            figure_placeholders = [block for block in blocks if isinstance(block, FigureBlock)]
+
+            self.assertEqual(len(images), 1)
+            self.assertEqual(images[0].caption, "Figure 1. Proper caption.")
+            self.assertFalse(any(block.caption == "Figures" for block in figure_placeholders))
+
+    def test_unsupported_figure_format_uses_placeholder_and_warns(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Normal", "1. Results"),
+                    {"image": {"filename": "image_1.emf", "bytes": b"emf"}},
+                    ("Normal", "Figure 1. Unsupported figure."),
+                ],
+            )
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            section_tex = result.section_files[0].read_text(encoding="utf-8")
+            qa_result = check_project(output_dir)
+
+            self.assertIn(r"Unsupported figure format: figure\_001.emf", section_tex)
+            self.assertIn("% TODO: Convert unsupported figure format for Overleaf", section_tex)
+            self.assertNotIn(r"\includegraphics[width=\linewidth]{figures/figure_001.emf}", section_tex)
+            self.assertEqual(qa_result.status, "WARN")
+            self.assertTrue(
+                any("Unsupported figure format for Overleaf" in issue.message for issue in qa_result.warnings)
+            )
 
     def test_detects_equations_from_omml(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -493,7 +735,7 @@ class ConversionTests(unittest.TestCase):
             begin_document_index = main_tex.index(r"\begin{document}")
             title_index = main_tex.index(r"\title{Converted Word Document}")
             maketitle_index = main_tex.index(r"\maketitle")
-            section_index = main_tex.index(r"\input{sections/section_01_intro}")
+            section_index = main_tex.index(r"\input{sections/01_intro}")
             bibliography_style_index = main_tex.index(r"\bibliographystyle{plainnat}")
             bibliography_index = main_tex.index(r"\bibliography{references}")
             end_document_index = main_tex.index(r"\end{document}")

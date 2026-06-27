@@ -8,11 +8,16 @@ copy per manuscript, place the Word file at `input/report.docx`, and run
 
 - reads `.docx` input directly from the Office XML package
 - detects Word headings and body paragraphs
+- infers section headings from numbered manuscript text when Word heading styles are missing
+- detects title, authors, affiliations, abstract, and keywords as manuscript front matter
 - groups content into sections while preserving block order
+- writes one clean `main.tex` plus one file per top-level section by default
+- keeps subsections and subsubsections inside their parent section file by default
 - converts Word tables into LaTeX `table` environments
 - moves large tables into `tables/*.tex` and includes them from section files
 - extracts embedded DOCX images into `figures/` and emits LaTeX figure environments
 - matches nearby figure captions when possible and falls back to `TODO: Add caption`
+- preserves unsupported figure formats as explicit placeholders and flags them in QA instead of emitting broken `\includegraphics`
 - converts simple author-year citations into `natbib` commands
 - parses a trailing References/Bibliography section into best-effort BibTeX entries
 - falls back to placeholder BibTeX entries for citations that are not matched to parsed references
@@ -133,10 +138,10 @@ output/
 |-- figures/
 |   `-- figure_001.png
 |-- tables/
-|   `-- table_01_01_table_1_results_summary.tex
+|   `-- table_01_table_1_results_summary.tex
 `-- sections/
-    |-- section_01_introduction.tex
-    `-- section_02_method.tex
+    |-- 01_introduction.tex
+    `-- 02_methods.tex
 ```
 
 ## Configuration
@@ -156,6 +161,8 @@ project:
   date: \today
 latex:
   include_toc: true
+section_splitting:
+  split_level: section
 overleaf:
   enabled: false
   project_id: ""
@@ -185,15 +192,28 @@ Template status:
 - `copernicus`, `agu`, `springer`, and `nature` are placeholder structures that
   can later be replaced with the official publisher class files and formatting.
 
+`section_splitting.split_level` supports:
+
+- `section`
+- `subsection`
+- `none`
+
 The generated `main.tex` always includes:
 
 - `\documentclass{...}`
 - `\input{preamble}`
 - `\title{...}`, `\author{...}`, `\date{...}`
 - `\begin{document}` and `\maketitle`
-- section inputs from `sections/`
+- detected abstract and keywords when present
+- body content directly, or `\input{sections/...}` entries depending on `split_level`
 - `\bibliographystyle{plainnat}` and `\bibliography{references}`
 - `\end{document}`
+
+Default section splitting behavior:
+
+- `section`: create one file per top-level `\section{...}`
+- `subsection`: create files for `\section{...}` and `\subsection{...}`
+- `none`: keep all manuscript body content directly in `main.tex`
 
 ## Testing
 
@@ -292,7 +312,9 @@ Failure handling:
 
 ## Notes
 
-- Headings are detected from Word paragraph styles such as `Heading 1`.
+- Headings are detected from Word paragraph styles such as `Heading 1`, and from numbered manuscript text such as `1. Introduction` and `2.1 Data`.
+- Front matter is detected before the body when possible:
+  title, author lines, affiliation lines, `Abstract`, and `Keywords:`.
 - Paragraph text is escaped for common LaTeX special characters.
 - Large tables are externalized when they have at least 5 rows or 4 columns.
 - Embedded images are saved with stable filenames such as `figure_001.png`.
@@ -314,11 +336,14 @@ Failure handling:
 - If the manuscript includes a `References` or `Bibliography` section, the agent
   attempts to parse lines in the form `Authors, YEAR: Title. Journal, Volume, pages.`
   into BibTeX entries with `author`, `title`, `journal`, `year`, `volume`, and `pages`.
+- The parser also recognizes bibliography paragraphs emitted by EndNote-style Word exports.
 - Climate-style `and Coauthors` text is normalized to BibTeX-friendly `and others`.
 - Generated bibliography keys are stable best-effort keys such as `hersbach2020era5`.
 - Page ranges are normalized from forms like `1999-2049` to `1999--2049`.
 - If a reference item cannot be parsed, the agent still falls back to placeholder
   BibTeX entries for unmatched in-text citations.
+- Supported citation conversion also accepts forms without a comma before the year,
+  such as `(Hersbach et al. 2020)` and `(Cho and Lu 2017)`.
 - `QA_REPORT.md` is generated only when the checker is run.
 - If a document starts with body text before any heading, that content is placed
   into a default `Introduction` section.

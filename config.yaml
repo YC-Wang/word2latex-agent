@@ -10,6 +10,8 @@ project:
   date: \today
 latex:
   include_toc: true
+section_splitting:
+  split_level: section
 overleaf:
   enabled: false
   project_id: ""
