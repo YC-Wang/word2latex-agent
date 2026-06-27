@@ -10,6 +10,7 @@ from .template_manager import load_template, render_template
 
 LARGE_TABLE_ROW_THRESHOLD = 5
 LARGE_TABLE_COLUMN_THRESHOLD = 4
+MAX_FILENAME_STEM_LENGTH = 80
 
 
 def write_project(
@@ -169,7 +170,11 @@ def _render_section(
             table_label = _build_table_label(section, block, table_count)
             rendered_table = _render_table(block, table_label)
             if _is_large_table(block):
-                table_path = tables_dir / f"table_{section_index:02d}_{table_count:02d}_{slugify(block.caption or block.rows[0][0] if block.rows and block.rows[0] else 'table', fallback='table')}.tex"
+                table_slug = _safe_filename_slug(
+                    block.caption or block.rows[0][0] if block.rows and block.rows[0] else "table",
+                    fallback="table",
+                )
+                table_path = tables_dir / f"table_{section_index:02d}_{table_count:02d}_{table_slug}.tex"
                 table_path.write_text(rendered_table, encoding="utf-8")
                 created_table_files.append(table_path)
                 include_path = table_path.relative_to(table_path.parent.parent).with_suffix("")
@@ -270,6 +275,11 @@ def _render_latex_metadata_value(value: object) -> str:
 
 def _normalize_template_whitespace(text: str) -> str:
     return text.replace("{ ", "{").replace(" }", "}")
+
+
+def _safe_filename_slug(text: str, fallback: str) -> str:
+    slug = slugify(text, fallback=fallback)
+    return slug[:MAX_FILENAME_STEM_LENGTH].rstrip("_") or fallback
 
 
 def _escape_latex(text: str) -> str:
