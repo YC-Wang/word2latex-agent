@@ -5,3 +5,7 @@ project:
   date: \today
 latex:
   include_toc: true
+overleaf:
+  enabled: false
+  git_remote: ""
+  branch: main

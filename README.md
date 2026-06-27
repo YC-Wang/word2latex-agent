@@ -1,8 +1,8 @@
 # word2latex-agent
 
-Version 0.7 adds a journal-template framework on top of the Overleaf-ready
-project generator, with configurable metadata plus section, table, embedded
-figure, citation, and basic equation support.
+Version 0.9 adds Overleaf Git synchronization on top of the journal-template
+framework, with configurable metadata plus section, table, embedded figure,
+citation, and basic equation support.
 
 ## Features
 
@@ -22,6 +22,7 @@ figure, citation, and basic equation support.
 - supports selectable output templates, including generic article/report layouts
 - includes placeholder publisher template folders for Copernicus, AGU, Springer, and Nature
 - includes a LaTeX project QA checker that writes `QA_REPORT.md`
+- supports pushing generated projects to Overleaf via Git, with dry-run mode
 - writes `main.tex` plus `sections/*.tex`
 - creates an Overleaf-ready output folder
 - exposes a CLI through `run.py`
@@ -97,6 +98,18 @@ Run QA checks against an existing generated project:
 python run.py --check output/sample_project
 ```
 
+Push a generated project to Overleaf:
+
+```powershell
+python run.py --sync-overleaf output/sample_project
+```
+
+Preview the exact Git commands without executing them:
+
+```powershell
+python run.py --sync-overleaf output/sample_project --dry-run
+```
+
 Expected output:
 
 ```text
@@ -126,6 +139,10 @@ project:
   date: \today
 latex:
   include_toc: true
+overleaf:
+  enabled: false
+  git_remote: ""
+  branch: main
 ```
 
 To override the class explicitly, add for example:
@@ -185,6 +202,40 @@ The checker writes `QA_REPORT.md` and prints one of:
 - `WARN`
 - `FAIL`
 
+## Overleaf Git Sync
+
+Add your Overleaf Git remote to `config.yaml`:
+
+```yaml
+overleaf:
+  enabled: true
+  git_remote: "https://git.overleaf.com/YOUR_PROJECT_ID"
+  branch: main
+```
+
+Typical setup:
+
+1. Open the Overleaf project.
+2. Copy the Git URL from Overleaf's Git integration UI.
+3. Paste it into `overleaf.git_remote` in `config.yaml`.
+4. Run `python run.py --sync-overleaf output/sample_project --dry-run`.
+5. If the commands look correct, run `python run.py --sync-overleaf output/sample_project`.
+
+The sync command:
+
+- verifies the output directory and `main.tex`
+- initializes Git in the generated project if needed
+- refuses to proceed if an existing project repo has uncommitted changes
+- adds an `overleaf` remote when missing
+- commits generated files
+- pushes to the configured branch
+
+Failure handling:
+
+- missing `git_remote` produces a clear error
+- authentication failures produce a clear error
+- dry-run mode prints the exact Git commands without executing them
+
 ## Notes
 
 - Headings are detected from Word paragraph styles such as `Heading 1`.
@@ -211,4 +262,4 @@ The checker writes `QA_REPORT.md` and prints one of:
 - If a document starts with body text before any heading, that content is placed
   into a default `Introduction` section.
 - Official publisher templates are not implemented yet.
-- Overleaf sync is intentionally not implemented yet.
+- Overleaf Git sync does not implement any AI rewriting or conflict resolution.

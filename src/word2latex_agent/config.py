@@ -16,6 +16,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "latex": {
         "include_toc": True,
     },
+    "overleaf": {
+        "enabled": False,
+        "git_remote": "",
+        "branch": "main",
+    },
 }
 
 

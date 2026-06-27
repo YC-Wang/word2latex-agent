@@ -3,12 +3,14 @@ import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from word2latex_agent import WordToLatexAgent
 from word2latex_agent.citations import convert_text_citations
 from word2latex_agent.cli import build_parser
 from word2latex_agent.docx_reader import read_docx_blocks, read_docx_paragraphs, split_into_sections
 from word2latex_agent.models import EquationBlock, FigureBlock, ImageBlock, TableBlock
+from word2latex_agent.overleaf_sync import OverleafSyncError, sync_to_overleaf
 from word2latex_agent.qa_checker import check_project
 from word2latex_agent.template_manager import list_templates
 
@@ -608,6 +610,142 @@ class ConversionTests(unittest.TestCase):
 
             self.assertIn("PASS", completed.stdout)
             self.assertTrue((output_dir / "QA_REPORT.md").exists())
+
+    def test_sync_overleaf_requires_git_remote(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir) / "sample_project"
+            project_dir.mkdir()
+            (project_dir / "main.tex").write_text(r"\documentclass{article}", encoding="utf-8")
+
+            with self.assertRaisesRegex(OverleafSyncError, "git_remote is missing"):
+                sync_to_overleaf(project_dir, {"overleaf": {"git_remote": "", "branch": "main"}})
+
+    def test_sync_overleaf_dry_run_shows_exact_commands(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir) / "sample_project"
+            project_dir.mkdir()
+            (project_dir / "main.tex").write_text(r"\documentclass{article}", encoding="utf-8")
+
+            result = sync_to_overleaf(
+                project_dir,
+                {"overleaf": {"git_remote": "https://git.overleaf.com/project", "branch": "main"}},
+                dry_run=True,
+            )
+
+            self.assertTrue(result.dry_run)
+            self.assertEqual(
+                result.commands,
+                [
+                    ["git", "init"],
+                    ["git", "remote", "add", "overleaf", "https://git.overleaf.com/project"],
+                    ["git", "add", "."],
+                    ["git", "commit", "-m", "Sync generated Overleaf project"],
+                    ["git", "push", "overleaf", "HEAD:main"],
+                ],
+            )
+
+    @patch("word2latex_agent.overleaf_sync.subprocess.run")
+    def test_sync_overleaf_refuses_dirty_existing_repo(self, mock_run: object) -> None:
+        with TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir) / "sample_project"
+            (project_dir / ".git").mkdir(parents=True)
+            (project_dir / "main.tex").write_text(r"\documentclass{article}", encoding="utf-8")
+
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=["git", "status", "--porcelain"],
+                returncode=0,
+                stdout=" M main.tex\n",
+                stderr="",
+            )
+
+            with self.assertRaisesRegex(OverleafSyncError, "Uncommitted changes exist"):
+                sync_to_overleaf(
+                    project_dir,
+                    {"overleaf": {"git_remote": "https://git.overleaf.com/project", "branch": "main"}},
+                )
+
+    @patch("word2latex_agent.overleaf_sync.subprocess.run")
+    def test_sync_overleaf_translates_auth_failure(self, mock_run: object) -> None:
+        with TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir) / "sample_project"
+            project_dir.mkdir()
+            (project_dir / "main.tex").write_text(r"\documentclass{article}", encoding="utf-8")
+
+            responses = [
+                subprocess.CompletedProcess(args=["git", "init"], returncode=0, stdout="", stderr=""),
+                subprocess.CompletedProcess(
+                    args=["git", "remote", "add", "overleaf", "https://git.overleaf.com/project"],
+                    returncode=0,
+                    stdout="",
+                    stderr="",
+                ),
+                subprocess.CompletedProcess(args=["git", "add", "."], returncode=0, stdout="", stderr=""),
+                subprocess.CompletedProcess(
+                    args=["git", "commit", "-m", "Sync generated Overleaf project"],
+                    returncode=0,
+                    stdout="[main abc123] commit",
+                    stderr="",
+                ),
+                subprocess.CalledProcessError(
+                    returncode=1,
+                    cmd=["git", "push", "overleaf", "HEAD:main"],
+                    stderr="Authentication failed",
+                    output="",
+                ),
+            ]
+
+            mock_run.side_effect = responses
+
+            with self.assertRaisesRegex(OverleafSyncError, "authentication failed"):
+                sync_to_overleaf(
+                    project_dir,
+                    {"overleaf": {"git_remote": "https://git.overleaf.com/project", "branch": "main"}},
+                )
+
+    @patch("word2latex_agent.overleaf_sync.subprocess.run")
+    def test_sync_overleaf_executes_expected_git_sequence(self, mock_run: object) -> None:
+        with TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir) / "sample_project"
+            project_dir.mkdir()
+            (project_dir / "main.tex").write_text(r"\documentclass{article}", encoding="utf-8")
+
+            mock_run.side_effect = [
+                subprocess.CompletedProcess(args=["git", "init"], returncode=0, stdout="", stderr=""),
+                subprocess.CompletedProcess(
+                    args=["git", "remote", "add", "overleaf", "https://git.overleaf.com/project"],
+                    returncode=0,
+                    stdout="",
+                    stderr="",
+                ),
+                subprocess.CompletedProcess(args=["git", "add", "."], returncode=0, stdout="", stderr=""),
+                subprocess.CompletedProcess(
+                    args=["git", "commit", "-m", "Sync generated Overleaf project"],
+                    returncode=0,
+                    stdout="[main abc123] commit",
+                    stderr="",
+                ),
+                subprocess.CompletedProcess(
+                    args=["git", "push", "overleaf", "HEAD:main"],
+                    returncode=0,
+                    stdout="",
+                    stderr="",
+                ),
+            ]
+
+            result = sync_to_overleaf(
+                project_dir,
+                {"overleaf": {"git_remote": "https://git.overleaf.com/project", "branch": "main"}},
+            )
+
+            self.assertFalse(result.dry_run)
+            self.assertIn("Pushed project to Overleaf remote", result.message)
+            self.assertEqual(mock_run.call_count, 5)
+
+    def test_cli_parser_accepts_sync_arguments(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["--sync-overleaf", "output/sample_project", "--dry-run"])
+        self.assertEqual(args.sync_overleaf, Path("output/sample_project"))
+        self.assertTrue(args.dry_run)
 
 
 if __name__ == "__main__":

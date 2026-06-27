@@ -6,6 +6,8 @@ import argparse
 from pathlib import Path
 
 from .agent import WordToLatexAgent
+from .config import load_config
+from .overleaf_sync import OverleafSyncError, sync_to_overleaf
 from .qa_checker import check_project
 from .template_manager import list_templates
 
@@ -39,6 +41,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Validate an existing generated LaTeX project and write QA_REPORT.md",
     )
+    parser.add_argument(
+        "--sync-overleaf",
+        type=Path,
+        help="Push an existing generated LaTeX project to the configured Overleaf Git remote",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show sync commands without executing them",
+    )
     return parser
 
 
@@ -56,8 +68,23 @@ def main() -> None:
         )
         return
 
+    if args.sync_overleaf is not None:
+        config = load_config(args.config)
+        try:
+            result = sync_to_overleaf(args.sync_overleaf, config, dry_run=args.dry_run)
+        except OverleafSyncError as error:
+            raise SystemExit(str(error)) from error
+        if result.dry_run:
+            print("DRY-RUN")
+            for command in result.commands:
+                print(" ".join(command))
+        print(result.message)
+        return
+
     if args.input is None or args.output is None:
-        raise SystemExit("--input and --output are required unless --list-templates or --check is used")
+        raise SystemExit(
+            "--input and --output are required unless --list-templates, --check, or --sync-overleaf is used"
+        )
 
     agent = WordToLatexAgent(config_path=args.config, template_name=args.template)
     result = agent.convert(input_path=args.input, output_dir=args.output)
