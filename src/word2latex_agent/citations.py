@@ -7,12 +7,18 @@ from collections.abc import Iterable
 
 from .models import BibliographyEntry, CitationRecord
 
+AUTHOR_NAME_PATTERN = r"[A-Z][A-Za-z'`\-]+"
+AUTHOR_TOKEN_PATTERN = (
+    rf"{AUTHOR_NAME_PATTERN}"
+    rf"(?:\s+(?:and|&)\s+{AUTHOR_NAME_PATTERN})?"
+    rf"(?: et al\.)?"
+)
 PARENTHETICAL_PATTERN = re.compile(r"\(([^()]*\d{4}[^()]*)\)")
 NARRATIVE_PATTERN = re.compile(
-    r"(?P<author>[A-Z][A-Za-z'`\-]+(?: et al\.)?)\s*\((?P<year>\d{4})\)"
+    rf"(?P<author>{AUTHOR_TOKEN_PATTERN})\s*\((?P<year>\d{{4}})\)"
 )
 AUTHOR_YEAR_PATTERN = re.compile(
-    r"^\s*(?P<author>[A-Z][A-Za-z'`\-]+(?: et al\.)?)\s*,\s*(?P<year>\d{4})\s*$"
+    rf"^\s*(?P<author>{AUTHOR_TOKEN_PATTERN})\s*,?\s*(?P<year>\d{{4}})\s*$"
 )
 REFERENCE_PATTERN = re.compile(
     r"^(?P<authors>.+),\s*(?P<year>\d{4})\s*:\s*(?P<rest>.+)$"

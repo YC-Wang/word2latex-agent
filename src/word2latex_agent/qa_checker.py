@@ -14,6 +14,7 @@ REF_PATTERN = re.compile(r"\\(?:ref|eqref|autoref)\{([^}]+)\}")
 CITE_PATTERN = re.compile(r"\\cite(?:p|t)\{([^}]+)\}")
 BIB_ENTRY_PATTERN = re.compile(r"@\w+\{([^,]+),")
 TODO_PATTERN = re.compile(r"TODO")
+SUPPORTED_FIGURE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".pdf"}
 
 
 def check_project(project_dir: str | Path) -> QAResult:
@@ -106,6 +107,18 @@ def check_project(project_dir: str | Path) -> QAResult:
         warnings.append(
             QAIssue("WARN", f"Unused BibTeX entry: {key}", str(bibliography_path))
         )
+
+    figures_dir = root / "figures"
+    if figures_dir.exists():
+        for figure_path in sorted(figures_dir.iterdir()):
+            if figure_path.is_file() and figure_path.suffix.lower() not in SUPPORTED_FIGURE_EXTENSIONS:
+                warnings.append(
+                    QAIssue(
+                        "WARN",
+                        f"Unsupported figure format for Overleaf: {figure_path.name}",
+                        str(figure_path),
+                    )
+                )
 
     status = _compute_status(failures, warnings)
     report_path.write_text(_render_report(root, status, failures, warnings), encoding="utf-8")

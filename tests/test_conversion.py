@@ -434,6 +434,38 @@ class ConversionTests(unittest.TestCase):
             self.assertIn(r"\subsection{Background}", first_section)
             self.assertIn("Background paragraph.", first_section)
 
+    def test_empty_top_level_sections_are_preserved_as_split_anchors(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Normal", "1. Introduction"),
+                    ("Normal", "1.1 Background"),
+                    ("Normal", "Background paragraph."),
+                    ("Normal", "2. Results"),
+                    ("Normal", "2.1 Findings"),
+                    ("Normal", "Findings paragraph."),
+                ],
+            )
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            first_section = (output_dir / "sections" / "01_introduction.tex").read_text(encoding="utf-8")
+            second_section = (output_dir / "sections" / "02_results.tex").read_text(encoding="utf-8")
+
+            self.assertEqual(
+                [path.name for path in result.section_files],
+                ["01_introduction.tex", "02_results.tex"],
+            )
+            self.assertIn(r"\section{Introduction}", first_section)
+            self.assertIn(r"\subsection{Background}", first_section)
+            self.assertIn("Background paragraph.", first_section)
+            self.assertIn(r"\section{Results}", second_section)
+            self.assertIn(r"\subsection{Findings}", second_section)
+            self.assertIn("Findings paragraph.", second_section)
+
     def test_split_level_subsection_creates_subsection_files(self) -> None:
         with TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)

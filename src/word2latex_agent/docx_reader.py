@@ -147,6 +147,7 @@ def split_into_sections(blocks: list[SectionContent]) -> list[Section]:
     """Group ordered content into sections based on detected heading levels."""
     sections: list[Section] = []
     current = Section(title="Introduction", level=1)
+    current_is_placeholder = True
 
     for block in blocks:
         if isinstance(block, ParagraphBlock):
@@ -154,14 +155,15 @@ def split_into_sections(blocks: list[SectionContent]) -> list[Section]:
         else:
             heading_level = None
         if heading_level is not None:
-            if current.blocks or current.title != "Introduction":
+            if not current_is_placeholder or current.blocks or current.title != "Introduction":
                 sections.append(current)
             current = Section(title=_clean_heading_title(block.text), level=heading_level)
+            current_is_placeholder = False
             continue
 
         current.blocks.append(block)
 
-    if current.blocks or not sections:
+    if current.blocks or not sections or not current_is_placeholder:
         sections.append(current)
 
     return sections
@@ -188,7 +190,7 @@ def extract_reference_section(sections: list[Section]) -> tuple[list[Section], l
                     reference_lines.append(normalized)
                 continue
             filtered_blocks.append(block)
-        if filtered_blocks or not content_sections:
+        if filtered_blocks or not content_sections or (section.level == 1 and not section.blocks):
             content_sections.append(Section(title=section.title, level=section.level, blocks=filtered_blocks))
 
     if not content_sections:
