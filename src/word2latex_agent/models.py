@@ -94,6 +94,11 @@ class ConversionResult:
     figure_files: list[Path]
     bibliography_path: Path
     preamble_path: Path
+    template_name: str
+    section_count: int
+    table_count: int
+    figure_count: int
+    citation_count: int
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,4 +1,8 @@
 template: generic_article
+workflow:
+  default_output_folder: "output"
+  default_template: "generic_article"
+  dry_run: false
 project:
   title: "Converted Word Document"
   author: "word2latex-agent"
@@ -7,5 +11,6 @@ latex:
   include_toc: true
 overleaf:
   enabled: false
+  project_id: ""
   git_remote: ""
   branch: main

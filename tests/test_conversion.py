@@ -1,5 +1,7 @@
+import io
 import subprocess
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -7,9 +9,10 @@ from unittest.mock import patch
 
 from word2latex_agent import WordToLatexAgent
 from word2latex_agent.citations import convert_text_citations
-from word2latex_agent.cli import build_parser
+from word2latex_agent.cli import WORKFLOW_TARGET, build_parser, main as cli_main
 from word2latex_agent.docx_reader import read_docx_blocks, read_docx_paragraphs, split_into_sections
-from word2latex_agent.models import EquationBlock, FigureBlock, ImageBlock, TableBlock
+from word2latex_agent.models import EquationBlock, FigureBlock, ImageBlock, QAIssue, QAResult, TableBlock
+from word2latex_agent.overleaf_sync import SyncResult
 from word2latex_agent.overleaf_sync import OverleafSyncError, sync_to_overleaf
 from word2latex_agent.qa_checker import check_project
 from word2latex_agent.template_manager import list_templates
@@ -744,8 +747,139 @@ class ConversionTests(unittest.TestCase):
     def test_cli_parser_accepts_sync_arguments(self) -> None:
         parser = build_parser()
         args = parser.parse_args(["--sync-overleaf", "output/sample_project", "--dry-run"])
-        self.assertEqual(args.sync_overleaf, Path("output/sample_project"))
+        self.assertEqual(args.sync_overleaf, "output/sample_project")
         self.assertTrue(args.dry_run)
+
+    def test_cli_parser_supports_workflow_flags_without_paths(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["--check", "--sync-overleaf"])
+        self.assertEqual(args.check, WORKFLOW_TARGET)
+        self.assertEqual(args.sync_overleaf, WORKFLOW_TARGET)
+
+    @patch("word2latex_agent.cli.sync_to_overleaf")
+    def test_full_workflow_runs_convert_check_and_sync(self, mock_sync: object) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "report.docx"
+            output_dir = temp_path / "projects" / "report"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Intro"),
+                    ("Normal", "Body text."),
+                ],
+            )
+            mock_sync.return_value = SyncResult(
+                project_dir=output_dir,
+                dry_run=False,
+                commands=[["git", "push"]],
+                message="Pushed project to Overleaf remote 'https://git.overleaf.com/project' on branch 'main'.",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                cli_main(
+                    [
+                        "--input",
+                        str(source),
+                        "--output",
+                        str(output_dir),
+                        "--template",
+                        "generic_article",
+                        "--check",
+                        "--sync-overleaf",
+                    ]
+                )
+
+            rendered = stdout.getvalue()
+            self.assertIn("Workflow Summary", rendered)
+            self.assertIn("QA status: PASS", rendered)
+            self.assertIn("Overleaf sync status: SYNCED", rendered)
+            self.assertTrue((output_dir / "QA_REPORT.md").exists())
+            mock_sync.assert_called_once()
+
+    @patch("word2latex_agent.cli.sync_to_overleaf")
+    @patch("word2latex_agent.cli.check_project")
+    def test_full_workflow_skips_sync_when_qa_fails(
+        self, mock_check_project: object, mock_sync: object
+    ) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "report.docx"
+            output_dir = temp_path / "projects" / "report"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Figures"),
+                    {"image": {"filename": "uncaptioned.png", "bytes": b"\x89PNG\r\n\x1a\nimg"}},
+                ],
+            )
+            mock_check_project.return_value = QAResult(
+                project_dir=output_dir,
+                report_path=output_dir / "QA_REPORT.md",
+                status="FAIL",
+                failures=[QAIssue("FAIL", "Forced QA failure", "test")],
+                warnings=[],
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                cli_main(
+                    [
+                        "--input",
+                        str(source),
+                        "--output",
+                        str(output_dir),
+                        "--check",
+                        "--sync-overleaf",
+                    ]
+                )
+
+            rendered = stdout.getvalue()
+            self.assertIn("QA status: FAIL", rendered)
+            self.assertIn("Overleaf sync status: SKIPPED (QA failed)", rendered)
+            mock_sync.assert_not_called()
+
+    def test_full_workflow_uses_default_output_folder(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "report.docx"
+            config_path = temp_path / "config.yaml"
+            make_docx(source, [("Heading1", "Intro"), ("Normal", "Body text.")])
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "template: generic_article",
+                        "workflow:",
+                        f'  default_output_folder: "{(temp_path / "projects").as_posix()}"',
+                        '  default_template: "generic_report"',
+                        "  dry_run: false",
+                        "project:",
+                        '  title: "Converted Word Document"',
+                        '  author: "word2latex-agent"',
+                        "  date: \\today",
+                        "latex:",
+                        "  include_toc: true",
+                        "overleaf:",
+                        "  enabled: false",
+                        '  project_id: ""',
+                        '  git_remote: ""',
+                        '  branch: "main"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                cli_main(["--input", str(source), "--config", str(config_path)])
+
+            rendered = stdout.getvalue()
+            self.assertIn("Workflow Summary", rendered)
+            generated_main = temp_path / "projects" / "report" / "main.tex"
+            self.assertTrue(generated_main.exists())
+            self.assertIn(r"\documentclass{report}", generated_main.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

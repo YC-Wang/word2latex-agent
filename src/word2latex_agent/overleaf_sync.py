@@ -39,7 +39,10 @@ def sync_to_overleaf(
     overleaf = config.get("overleaf", {})
     if not isinstance(overleaf, dict):
         overleaf = {}
+    project_id = str(overleaf.get("project_id", "")).strip()
     git_remote = str(overleaf.get("git_remote", "")).strip()
+    if not git_remote and project_id:
+        git_remote = f"https://git.overleaf.com/{project_id}"
     branch = str(overleaf.get("branch", "main")).strip() or "main"
     if not git_remote:
         raise OverleafSyncError("Overleaf git_remote is missing in config.yaml")

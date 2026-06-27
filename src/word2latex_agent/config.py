@@ -8,6 +8,11 @@ from typing import Any
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "template": "generic_article",
+    "workflow": {
+        "default_output_folder": "output",
+        "default_template": "generic_article",
+        "dry_run": False,
+    },
     "project": {
         "title": "Converted Word Document",
         "author": "word2latex-agent",
@@ -18,6 +23,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "overleaf": {
         "enabled": False,
+        "project_id": "",
         "git_remote": "",
         "branch": "main",
     },

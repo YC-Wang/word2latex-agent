@@ -16,7 +16,7 @@ def write_project(
     output_dir: str | Path,
     sections: list[Section],
     config: dict[str, object],
-) -> tuple[Path, list[Path], list[Path], list[Path], Path, Path]:
+) -> tuple[Path, list[Path], list[Path], list[Path], Path, Path, int]:
     """Write `main.tex` and section files into the output directory."""
     template_name = str(config.get("template", "generic_article"))
     template_definition = load_template(template_name)
@@ -49,7 +49,16 @@ def write_project(
     bibliography_path.write_text(render_bibliography(all_citations), encoding="utf-8")
     main_tex = root / "main.tex"
     main_tex.write_text(_render_main(config, section_files, template_definition), encoding="utf-8")
-    return main_tex, section_files, table_files, figure_files, bibliography_path, preamble_path
+    citation_count = len({citation.key for citation in all_citations})
+    return (
+        main_tex,
+        section_files,
+        table_files,
+        figure_files,
+        bibliography_path,
+        preamble_path,
+        citation_count,
+    )
 
 
 def _render_main(

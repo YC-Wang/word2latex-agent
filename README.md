@@ -1,8 +1,7 @@
 # word2latex-agent
 
-Version 0.9 adds Overleaf Git synchronization on top of the journal-template
-framework, with configurable metadata plus section, table, embedded figure,
-citation, and basic equation support.
+Version 1.0 provides a stable end-to-end workflow from DOCX input to an
+Overleaf-ready LaTeX project, including optional QA and Overleaf Git sync.
 
 ## Features
 
@@ -23,6 +22,7 @@ citation, and basic equation support.
 - includes placeholder publisher template folders for Copernicus, AGU, Springer, and Nature
 - includes a LaTeX project QA checker that writes `QA_REPORT.md`
 - supports pushing generated projects to Overleaf via Git, with dry-run mode
+- supports a single end-to-end command that can convert, check, and sync
 - writes `main.tex` plus `sections/*.tex`
 - creates an Overleaf-ready output folder
 - exposes a CLI through `run.py`
@@ -80,6 +80,12 @@ Run the converter against the included sample document:
 python run.py --input examples/sample.docx --output output/sample_project
 ```
 
+Run the full workflow in one command:
+
+```powershell
+python run.py --input report.docx --output projects/report --template generic_article --check --sync-overleaf
+```
+
 List available templates:
 
 ```powershell
@@ -133,6 +139,10 @@ Default behavior lives in `config.yaml`:
 
 ```yaml
 template: generic_article
+workflow:
+  default_output_folder: "output"
+  default_template: "generic_article"
+  dry_run: false
 project:
   title: "Converted Word Document"
   author: "word2latex-agent"
@@ -141,6 +151,7 @@ latex:
   include_toc: true
 overleaf:
   enabled: false
+  project_id: ""
   git_remote: ""
   branch: main
 ```
@@ -183,6 +194,33 @@ The generated `main.tex` always includes:
 python -m unittest
 ```
 
+## End-to-End Workflow
+
+The main workflow command runs in this order:
+
+1. Parse the input DOCX.
+2. Generate the LaTeX project structure.
+3. Extract figures and tables.
+4. Generate `references.bib`.
+5. Run the QA checker when `--check` is enabled.
+6. Sync to Overleaf when `--sync-overleaf` is enabled and QA is `PASS` or `WARN`.
+
+At the end of the run, the CLI prints a workflow summary with:
+
+- generated files
+- number of sections
+- number of figures
+- number of tables
+- number of citations
+- QA status
+- Overleaf sync status
+
+You can inspect command-line options with:
+
+```powershell
+python run.py --help
+```
+
 ## QA Checker
 
 The QA checker validates:
@@ -209,6 +247,7 @@ Add your Overleaf Git remote to `config.yaml`:
 ```yaml
 overleaf:
   enabled: true
+  project_id: "YOUR_PROJECT_ID"
   git_remote: "https://git.overleaf.com/YOUR_PROJECT_ID"
   branch: main
 ```
@@ -217,7 +256,7 @@ Typical setup:
 
 1. Open the Overleaf project.
 2. Copy the Git URL from Overleaf's Git integration UI.
-3. Paste it into `overleaf.git_remote` in `config.yaml`.
+3. Paste it into `overleaf.git_remote` in `config.yaml`, or set `overleaf.project_id`.
 4. Run `python run.py --sync-overleaf output/sample_project --dry-run`.
 5. If the commands look correct, run `python run.py --sync-overleaf output/sample_project`.
 
