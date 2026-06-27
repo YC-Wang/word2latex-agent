@@ -1,7 +1,8 @@
 # word2latex-agent
 
-Version 1.0 provides a stable end-to-end workflow from DOCX input to an
-Overleaf-ready LaTeX project, including optional QA and Overleaf Git sync.
+This repository is a single-document Word-to-LaTeX project template. Clone one
+copy per manuscript, place the Word file at `input/report.docx`, and run
+`python run.py` to generate an Overleaf-ready LaTeX project.
 
 ## Features
 
@@ -31,12 +32,10 @@ Overleaf-ready LaTeX project, including optional QA and Overleaf Git sync.
 
 ```text
 .
-|-- examples/
-|   `-- sample.docx
 |-- output/
 |   `-- .gitkeep
-|-- prompts/
-|   `-- system_prompt.txt
+|-- input/
+|   `-- report.docx
 |-- src/
 |   `-- word2latex_agent/
 |       |-- __init__.py
@@ -74,16 +73,22 @@ pip install -e .
 
 ## Usage
 
-Run the converter against the included sample document:
+For the standard single-document workflow:
 
 ```powershell
-python run.py --input examples/sample.docx --output output/sample_project
+python run.py
 ```
 
 Run the full workflow in one command:
 
 ```powershell
-python run.py --input report.docx --output projects/report --template generic_article --check --sync-overleaf
+python run.py --check --sync-overleaf
+```
+
+Manual mode is still available:
+
+```powershell
+python run.py --input path/to/report.docx --output path/to/output
 ```
 
 List available templates:
@@ -95,31 +100,31 @@ python run.py --list-templates
 Override the template from the command line:
 
 ```powershell
-python run.py --input examples/sample.docx --output output/sample_project --template copernicus
+python run.py --template copernicus
 ```
 
 Run QA checks against an existing generated project:
 
 ```powershell
-python run.py --check output/sample_project
+python run.py --check output
 ```
 
 Push a generated project to Overleaf:
 
 ```powershell
-python run.py --sync-overleaf output/sample_project
+python run.py --sync-overleaf output
 ```
 
 Preview the exact Git commands without executing them:
 
 ```powershell
-python run.py --sync-overleaf output/sample_project --dry-run
+python run.py --sync-overleaf output --dry-run
 ```
 
 Expected output:
 
 ```text
-output/sample_project/
+output/
 |-- main.tex
 |-- preamble.tex
 |-- QA_REPORT.md
@@ -140,6 +145,7 @@ Default behavior lives in `config.yaml`:
 ```yaml
 template: generic_article
 workflow:
+  default_input_file: "input/report.docx"
   default_output_folder: "output"
   default_template: "generic_article"
   dry_run: false
@@ -205,6 +211,14 @@ The main workflow command runs in this order:
 5. Run the QA checker when `--check` is enabled.
 6. Sync to Overleaf when `--sync-overleaf` is enabled and QA is `PASS` or `WARN`.
 
+Recommended manuscript workflow:
+
+1. Clone this repository for a new manuscript.
+2. Replace `input/report.docx` with the manuscript Word file.
+3. Run `python run.py`.
+4. Review `output/`.
+5. Optionally run `python run.py --check` or `python run.py --check --sync-overleaf`.
+
 At the end of the run, the CLI prints a workflow summary with:
 
 - generated files
@@ -257,8 +271,8 @@ Typical setup:
 1. Open the Overleaf project.
 2. Copy the Git URL from Overleaf's Git integration UI.
 3. Paste it into `overleaf.git_remote` in `config.yaml`, or set `overleaf.project_id`.
-4. Run `python run.py --sync-overleaf output/sample_project --dry-run`.
-5. If the commands look correct, run `python run.py --sync-overleaf output/sample_project`.
+4. Run `python run.py --sync-overleaf output --dry-run`.
+5. If the commands look correct, run `python run.py --sync-overleaf output`.
 
 The sync command:
 

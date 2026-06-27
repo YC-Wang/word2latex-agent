@@ -17,13 +17,13 @@ WORKFLOW_TARGET = "__WORKFLOW__"
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Convert Word documents into Overleaf-ready LaTeX projects."
+        description="Convert the default manuscript in input/report.docx, or a supplied Word file, into an Overleaf-ready LaTeX project."
     )
-    parser.add_argument("--input", type=Path, help="Path to the input .docx file")
+    parser.add_argument("--input", type=Path, help="Path to the input .docx file. Defaults to input/report.docx.")
     parser.add_argument(
         "--output",
         type=Path,
-        help="Directory where the Overleaf-ready project will be created",
+        help="Directory where the Overleaf-ready project will be created. Defaults to output/.",
     )
     parser.add_argument(
         "--config",
@@ -92,18 +92,14 @@ def main(argv: list[str] | None = None) -> None:
         print(result.message)
         return
 
-    if args.input is None:
-        raise SystemExit(
-            "--input is required unless --list-templates, --check, or --sync-overleaf is used"
-        )
-
-    workflow_output = _resolve_output_path(args.input, args.output, config)
+    workflow_input = _resolve_input_path(args.input, config)
+    workflow_output = _resolve_output_path(args.output, config)
     template_name = args.template or _resolve_default_template(config)
     dry_run = _resolve_dry_run(args.dry_run, config)
 
     try:
         agent = WordToLatexAgent(config_path=args.config, template_name=template_name)
-        conversion_result = agent.convert(input_path=args.input, output_dir=workflow_output)
+        conversion_result = agent.convert(input_path=workflow_input, output_dir=workflow_output)
         qa_result = None
         sync_status = "SKIPPED"
 
@@ -143,14 +139,24 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(f"Workflow failed: {error}") from error
 
 
-def _resolve_output_path(input_path: Path, output_path: Path | None, config: dict[str, Any]) -> Path:
+def _resolve_input_path(input_path: Path | None, config: dict[str, Any]) -> Path:
+    if input_path is not None:
+        return input_path
+    workflow = config.get("workflow", {})
+    default_input_file = "input/report.docx"
+    if isinstance(workflow, dict):
+        default_input_file = str(workflow.get("default_input_file", "input/report.docx"))
+    return Path(default_input_file)
+
+
+def _resolve_output_path(output_path: Path | None, config: dict[str, Any]) -> Path:
     if output_path is not None:
         return output_path
     workflow = config.get("workflow", {})
     default_output_folder = "output"
     if isinstance(workflow, dict):
         default_output_folder = str(workflow.get("default_output_folder", "output"))
-    return Path(default_output_folder) / input_path.stem
+    return Path(default_output_folder)
 
 
 def _resolve_default_template(config: dict[str, Any]) -> str | None:

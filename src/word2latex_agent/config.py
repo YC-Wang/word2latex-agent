@@ -9,6 +9,7 @@ from typing import Any
 DEFAULT_CONFIG: dict[str, Any] = {
     "template": "generic_article",
     "workflow": {
+        "default_input_file": "input/report.docx",
         "default_output_folder": "output",
         "default_template": "generic_article",
         "dry_run": False,

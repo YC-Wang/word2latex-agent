@@ -1,1 +1,0 @@
-Convert Word document structure into clean, compilable LaTeX sections.

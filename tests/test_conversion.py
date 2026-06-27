@@ -877,9 +877,57 @@ class ConversionTests(unittest.TestCase):
 
             rendered = stdout.getvalue()
             self.assertIn("Workflow Summary", rendered)
-            generated_main = temp_path / "projects" / "report" / "main.tex"
+            generated_main = temp_path / "projects" / "main.tex"
             self.assertTrue(generated_main.exists())
             self.assertIn(r"\documentclass{report}", generated_main.read_text(encoding="utf-8"))
+
+    def test_full_workflow_uses_default_input_and_output_paths(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "output"
+            config_path = temp_path / "config.yaml"
+            input_dir.mkdir()
+            make_docx(
+                input_dir / "report.docx",
+                [
+                    ("Heading1", "Intro"),
+                    ("Normal", "Body text."),
+                ],
+            )
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "template: generic_article",
+                        "workflow:",
+                        f'  default_input_file: "{(input_dir / "report.docx").as_posix()}"',
+                        f'  default_output_folder: "{output_dir.as_posix()}"',
+                        '  default_template: "generic_article"',
+                        "  dry_run: false",
+                        "project:",
+                        '  title: "Converted Word Document"',
+                        '  author: "word2latex-agent"',
+                        "  date: \\today",
+                        "latex:",
+                        "  include_toc: true",
+                        "overleaf:",
+                        "  enabled: false",
+                        '  project_id: ""',
+                        '  git_remote: ""',
+                        '  branch: "main"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                cli_main(["--config", str(config_path)])
+
+            rendered = stdout.getvalue()
+            self.assertIn("Created LaTeX project at", rendered)
+            self.assertTrue((output_dir / "main.tex").exists())
 
 
 if __name__ == "__main__":
