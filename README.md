@@ -21,6 +21,7 @@ figure, citation, and basic equation support.
 - supports configurable project title, author, date, and document class
 - supports selectable output templates, including generic article/report layouts
 - includes placeholder publisher template folders for Copernicus, AGU, Springer, and Nature
+- includes a LaTeX project QA checker that writes `QA_REPORT.md`
 - writes `main.tex` plus `sections/*.tex`
 - creates an Overleaf-ready output folder
 - exposes a CLI through `run.py`
@@ -90,12 +91,19 @@ Override the template from the command line:
 python run.py --input examples/sample.docx --output output/sample_project --template copernicus
 ```
 
+Run QA checks against an existing generated project:
+
+```powershell
+python run.py --check output/sample_project
+```
+
 Expected output:
 
 ```text
 output/sample_project/
 |-- main.tex
 |-- preamble.tex
+|-- QA_REPORT.md
 |-- references.bib
 |-- figures/
 |   `-- figure_001.png
@@ -158,6 +166,25 @@ The generated `main.tex` always includes:
 python -m unittest
 ```
 
+## QA Checker
+
+The QA checker validates:
+
+- `main.tex`, `preamble.tex`, and `references.bib` exist
+- all `\input{...}` targets exist
+- all `\includegraphics{...}` targets exist
+- all `\ref{...}`-style references resolve to labels
+- duplicate `\label{...}` entries are reported
+- all `\citep{...}` and `\citet{...}` keys exist in `references.bib`
+- unused BibTeX entries are reported
+- TODO placeholders are reported
+
+The checker writes `QA_REPORT.md` and prints one of:
+
+- `PASS`
+- `WARN`
+- `FAIL`
+
 ## Notes
 
 - Headings are detected from Word paragraph styles such as `Heading 1`.
@@ -180,6 +207,7 @@ python -m unittest
   and multi-citations such as `(Coppola et al., 2021; Davolio et al., 2016)`.
 - Citation keys are generated as lowercase `lastname + year`, such as `wang2024`.
 - `references.bib` currently contains placeholder BibTeX entries only.
+- `QA_REPORT.md` is generated only when the checker is run.
 - If a document starts with body text before any heading, that content is placed
   into a default `Introduction` section.
 - Official publisher templates are not implemented yet.

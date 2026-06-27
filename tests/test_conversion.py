@@ -9,6 +9,7 @@ from word2latex_agent.citations import convert_text_citations
 from word2latex_agent.cli import build_parser
 from word2latex_agent.docx_reader import read_docx_blocks, read_docx_paragraphs, split_into_sections
 from word2latex_agent.models import EquationBlock, FigureBlock, ImageBlock, TableBlock
+from word2latex_agent.qa_checker import check_project
 from word2latex_agent.template_manager import list_templates
 
 from .fixtures import make_docx
@@ -492,6 +493,121 @@ class ConversionTests(unittest.TestCase):
         parser = build_parser()
         args = parser.parse_args(["--list-templates"])
         self.assertTrue(args.list_templates)
+
+    def test_qa_checker_reports_missing_required_files(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir) / "sample_project"
+            project_dir.mkdir()
+            result = check_project(project_dir)
+
+            self.assertEqual(result.status, "FAIL")
+            self.assertTrue(any("main.tex" in issue.message for issue in result.failures))
+            self.assertTrue(result.report_path.exists())
+
+    def test_qa_checker_detects_duplicate_labels(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(source, [("Heading1", "Intro"), ("Normal", "Body text.")])
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            section_path = result.section_files[0]
+            section_path.write_text(
+                section_path.read_text(encoding="utf-8") + "\n\\label{dup_label}\n\\label{dup_label}\n",
+                encoding="utf-8",
+            )
+
+            qa_result = check_project(output_dir)
+
+            self.assertEqual(qa_result.status, "FAIL")
+            self.assertTrue(any("Duplicate label" in issue.message for issue in qa_result.failures))
+
+    def test_qa_checker_detects_missing_figures(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Figures"),
+                    {"image": {"filename": "diagram.png", "bytes": b"\x89PNG\r\n\x1a\ndiagram"}},
+                ],
+            )
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            result.figure_files[0].unlink()
+
+            qa_result = check_project(output_dir)
+
+            self.assertEqual(qa_result.status, "FAIL")
+            self.assertTrue(any("figure file is missing" in issue.message for issue in qa_result.failures))
+
+    def test_qa_checker_detects_missing_citation_keys(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Related Work"),
+                    ("Normal", "See (Wang et al., 2024)."),
+                ],
+            )
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            result.bibliography_path.write_text("", encoding="utf-8")
+
+            qa_result = check_project(output_dir)
+
+            self.assertEqual(qa_result.status, "FAIL")
+            self.assertTrue(any("Missing BibTeX entry" in issue.message for issue in qa_result.failures))
+
+    def test_qa_checker_reports_todo_placeholders_and_unused_bibtex(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(
+                source,
+                [
+                    ("Heading1", "Figures"),
+                    {"image": {"filename": "diagram.png", "bytes": b"\x89PNG\r\n\x1a\ndiagram"}},
+                ],
+            )
+
+            result = WordToLatexAgent().convert(source, output_dir)
+            result.bibliography_path.write_text(
+                "@article{unused2024,\n  author = {Unused Author},\n  title = {Unused},\n  journal = {Unused},\n  year = {2024},\n}\n",
+                encoding="utf-8",
+            )
+
+            qa_result = check_project(output_dir)
+
+            self.assertEqual(qa_result.status, "WARN")
+            self.assertTrue(any("TODO placeholder" in issue.message for issue in qa_result.warnings))
+            self.assertTrue(any("Unused BibTeX entry" in issue.message for issue in qa_result.warnings))
+
+    def test_cli_check_prints_summary(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            run_path = Path(__file__).resolve().parents[1] / "run.py"
+            make_docx(source, [("Heading1", "Intro"), ("Normal", "Body text.")])
+            WordToLatexAgent().convert(source, output_dir)
+
+            completed = subprocess.run(
+                [sys.executable, str(run_path), "--check", str(output_dir)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertIn("PASS", completed.stdout)
+            self.assertTrue((output_dir / "QA_REPORT.md").exists())
 
 
 if __name__ == "__main__":

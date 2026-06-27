@@ -94,3 +94,23 @@ class ConversionResult:
     figure_files: list[Path]
     bibliography_path: Path
     preamble_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class QAIssue:
+    """Represents a single QA finding for a generated project."""
+
+    severity: str
+    message: str
+    source: str
+
+
+@dataclass(slots=True)
+class QAResult:
+    """Represents the full QA outcome for a generated project."""
+
+    project_dir: Path
+    report_path: Path
+    status: str
+    failures: list[QAIssue]
+    warnings: list[QAIssue]

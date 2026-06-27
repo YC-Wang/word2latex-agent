@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 from .agent import WordToLatexAgent
+from .qa_checker import check_project
 from .template_manager import list_templates
 
 
@@ -33,6 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="List available output templates and exit",
     )
+    parser.add_argument(
+        "--check",
+        type=Path,
+        help="Validate an existing generated LaTeX project and write QA_REPORT.md",
+    )
     return parser
 
 
@@ -43,8 +49,15 @@ def main() -> None:
             print(template_name)
         return
 
+    if args.check is not None:
+        result = check_project(args.check)
+        print(
+            f"{result.status} failures={len(result.failures)} warnings={len(result.warnings)} report={result.report_path}"
+        )
+        return
+
     if args.input is None or args.output is None:
-        raise SystemExit("--input and --output are required unless --list-templates is used")
+        raise SystemExit("--input and --output are required unless --list-templates or --check is used")
 
     agent = WordToLatexAgent(config_path=args.config, template_name=args.template)
     result = agent.convert(input_path=args.input, output_dir=args.output)
