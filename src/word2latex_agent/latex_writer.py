@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .citations import convert_text_citations, render_bibliography
 from .models import CitationRecord, EquationBlock, FigureBlock, ImageBlock, ParagraphBlock, Section, TableBlock, slugify
+from .template_manager import load_template, render_template
 
 LARGE_TABLE_ROW_THRESHOLD = 5
 LARGE_TABLE_COLUMN_THRESHOLD = 4
@@ -17,6 +18,8 @@ def write_project(
     config: dict[str, object],
 ) -> tuple[Path, list[Path], list[Path], list[Path], Path, Path]:
     """Write `main.tex` and section files into the output directory."""
+    template_name = str(config.get("template", "generic_article"))
+    template_definition = load_template(template_name)
     root = Path(output_dir)
     sections_dir = root / "sections"
     tables_dir = root / "tables"
@@ -41,39 +44,58 @@ def write_project(
         all_citations.extend(citations)
 
     preamble_path = root / "preamble.tex"
-    preamble_path.write_text(_render_preamble(), encoding="utf-8")
+    preamble_path.write_text(_render_preamble(template_definition), encoding="utf-8")
     bibliography_path = root / "references.bib"
     bibliography_path.write_text(render_bibliography(all_citations), encoding="utf-8")
     main_tex = root / "main.tex"
-    main_tex.write_text(_render_main(config, section_files), encoding="utf-8")
+    main_tex.write_text(_render_main(config, section_files, template_definition), encoding="utf-8")
     return main_tex, section_files, table_files, figure_files, bibliography_path, preamble_path
 
 
-def _render_main(config: dict[str, object], section_files: list[Path]) -> str:
+def _render_main(
+    config: dict[str, object],
+    section_files: list[Path],
+    template_definition: object,
+) -> str:
     project = _get_nested_dict(config, "project")
     latex = _get_nested_dict(config, "latex")
+    template_metadata = getattr(template_definition, "metadata")
     title = _escape_latex(str(project.get("title", "Converted Word Document")))
     author = _escape_latex(str(project.get("author", "word2latex-agent")))
     date = _render_latex_metadata_value(project.get("date", r"\today"))
-    document_class = _escape_latex(str(latex.get("document_class", "article")))
+    template_defaults = _get_nested_dict(template_metadata, "defaults")
+    document_class = _escape_latex(
+        str(
+            latex.get(
+                "document_class",
+                template_defaults.get("document_class", "article"),
+            )
+        )
+    )
     include_toc = bool(latex.get("include_toc", True))
-
-    lines = [
-        rf"\documentclass{{{document_class}}}",
-        r"\input{preamble}",
-        r"\title{" + title + "}",
-        r"\author{" + author + "}",
-        r"\date{" + date + "}",
-        r"\begin{document}",
-        r"\maketitle",
-    ]
+    section_inputs = []
     if include_toc:
-        lines.extend([r"\tableofcontents", r"\newpage"])
+        section_inputs.extend([r"\tableofcontents", r"\newpage"])
     for section_file in section_files:
         include_path = section_file.relative_to(section_file.parent.parent).with_suffix("")
-        lines.append(r"\input{" + include_path.as_posix() + "}")
-    lines.extend([r"\bibliographystyle{plainnat}", r"\bibliography{references}", r"\end{document}", ""])
-    return "\n".join(lines)
+        section_inputs.append(r"\input{" + include_path.as_posix() + "}")
+
+    bibliography_style = str(
+        template_defaults.get("bibliography_style", "plainnat")
+    )
+    values = {
+        "document_class": document_class,
+        "title": title,
+        "author": author,
+        "date": date,
+        "section_inputs": "\n".join(section_inputs),
+        "bibliography_style": bibliography_style,
+        "bibliography_file": "references",
+    }
+    rendered = _normalize_template_whitespace(
+        render_template(template_definition.main_template, values)
+    )
+    return rendered.rstrip() + "\n"
 
 
 def _render_section(
@@ -224,22 +246,10 @@ def _render_text_with_citations(text: str) -> tuple[str, list[CitationRecord]]:
     return "".join(rendered), citations
 
 
-def _render_preamble() -> str:
-    return "\n".join(
-        [
-            r"\usepackage[utf8]{inputenc}",
-            r"\usepackage[T1]{fontenc}",
-            r"\usepackage{graphicx}",
-            r"\usepackage{natbib}",
-            r"\usepackage{booktabs}",
-            r"\usepackage{longtable}",
-            r"\usepackage{amsmath}",
-            r"\usepackage{amssymb}",
-            r"\usepackage{hyperref}",
-            r"\usepackage[margin=1in]{geometry}",
-            "",
-        ]
-    )
+def _render_preamble(template_definition: object) -> str:
+    return _normalize_template_whitespace(
+        render_template(getattr(template_definition, "preamble_template"), {})
+    ).rstrip() + "\n"
 
 
 def _render_latex_metadata_value(value: object) -> str:
@@ -247,6 +257,10 @@ def _render_latex_metadata_value(value: object) -> str:
     if text.startswith("\\"):
         return text
     return _escape_latex(text)
+
+
+def _normalize_template_whitespace(text: str) -> str:
+    return text.replace("{ ", "{").replace(" }", "}")
 
 
 def _escape_latex(text: str) -> str:

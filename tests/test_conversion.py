@@ -1,16 +1,26 @@
+import subprocess
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
 from word2latex_agent import WordToLatexAgent
 from word2latex_agent.citations import convert_text_citations
+from word2latex_agent.cli import build_parser
 from word2latex_agent.docx_reader import read_docx_blocks, read_docx_paragraphs, split_into_sections
 from word2latex_agent.models import EquationBlock, FigureBlock, ImageBlock, TableBlock
+from word2latex_agent.template_manager import list_templates
 
 from .fixtures import make_docx
 
 
 class ConversionTests(unittest.TestCase):
+    def test_supported_templates_are_listed(self) -> None:
+        self.assertEqual(
+            list_templates(),
+            ["generic_article", "generic_report", "copernicus", "agu", "springer", "nature"],
+        )
+
     def test_docx_reader_detects_headings_and_paragraphs(self) -> None:
         with TemporaryDirectory() as temp_dir:
             source = Path(temp_dir) / "sample.docx"
@@ -398,6 +408,90 @@ class ConversionTests(unittest.TestCase):
             self.assertLess(section_index, bibliography_style_index)
             self.assertLess(bibliography_style_index, bibliography_index)
             self.assertLess(bibliography_index, end_document_index)
+
+    def test_invalid_template_raises_clear_error(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(source, [("Heading1", "Intro"), ("Normal", "Body.")])
+
+            with self.assertRaisesRegex(ValueError, "Unknown template"):
+                WordToLatexAgent(template_name="invalid_template").convert(source, output_dir)
+
+    def test_generic_article_generation_uses_article_class(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(source, [("Heading1", "Intro"), ("Normal", "Body.")])
+
+            result = WordToLatexAgent(template_name="generic_article").convert(source, output_dir)
+            main_tex = result.main_tex_path.read_text(encoding="utf-8")
+
+            self.assertIn(r"\documentclass{article}", main_tex)
+            self.assertIn(r"\input{preamble}", main_tex)
+
+    def test_generic_report_generation_uses_report_class(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            make_docx(source, [("Heading1", "Intro"), ("Normal", "Body.")])
+
+            result = WordToLatexAgent(template_name="generic_report").convert(source, output_dir)
+            main_tex = result.main_tex_path.read_text(encoding="utf-8")
+
+            self.assertIn(r"\documentclass{report}", main_tex)
+            self.assertIn(r"\input{preamble}", main_tex)
+
+    def test_cli_list_templates(self) -> None:
+        run_path = Path(__file__).resolve().parents[1] / "run.py"
+        completed = subprocess.run(
+            [sys.executable, str(run_path), "--list-templates"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(
+            completed.stdout.strip().splitlines(),
+            ["generic_article", "generic_report", "copernicus", "agu", "springer", "nature"],
+        )
+
+    def test_cli_template_selection_overrides_config(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "sample.docx"
+            output_dir = temp_path / "sample_project"
+            run_path = Path(__file__).resolve().parents[1] / "run.py"
+            make_docx(source, [("Heading1", "Intro"), ("Normal", "Body.")])
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(run_path),
+                    "--input",
+                    str(source),
+                    "--output",
+                    str(output_dir),
+                    "--template",
+                    "copernicus",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            main_tex = (output_dir / "main.tex").read_text(encoding="utf-8")
+            self.assertIn("Created LaTeX project at", completed.stdout)
+            self.assertIn(r"\bibliographystyle{copernicus}", main_tex)
+            self.assertIn("% Placeholder Copernicus template body.", main_tex)
+
+    def test_cli_parser_accepts_template_argument(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["--list-templates"])
+        self.assertTrue(args.list_templates)
 
 
 if __name__ == "__main__":

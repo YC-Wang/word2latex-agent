@@ -1,0 +1,5 @@
+name: agu
+description: "Placeholder for AGU publisher template."
+defaults:
+  document_class: article
+  bibliography_style: agu

@@ -13,8 +13,14 @@ from .models import ConversionResult
 class WordToLatexAgent:
     """Convert DOCX files into an Overleaf-ready LaTeX project."""
 
-    def __init__(self, config_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        config_path: str | Path | None = None,
+        template_name: str | None = None,
+    ) -> None:
         self.config = load_config(config_path)
+        if template_name is not None:
+            self.config["template"] = template_name
 
     def convert(self, input_path: str | Path, output_dir: str | Path) -> ConversionResult:
         source = Path(input_path)

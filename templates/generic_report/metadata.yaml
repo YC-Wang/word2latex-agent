@@ -1,0 +1,5 @@
+name: generic_report
+description: "Generic report-style Overleaf project."
+defaults:
+  document_class: report
+  bibliography_style: plainnat

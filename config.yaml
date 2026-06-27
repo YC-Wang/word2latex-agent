@@ -1,7 +1,7 @@
+template: generic_article
 project:
   title: "Converted Word Document"
   author: "word2latex-agent"
   date: \today
 latex:
-  document_class: "article"
   include_toc: true

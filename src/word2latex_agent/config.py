@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "template": "generic_article",
     "project": {
         "title": "Converted Word Document",
         "author": "word2latex-agent",
         "date": r"\today",
     },
     "latex": {
-        "document_class": "article",
         "include_toc": True,
     },
 }
@@ -29,7 +29,7 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
     if not path.exists():
         return merged
 
-    loaded = _parse_simple_yaml(path.read_text(encoding="utf-8"))
+    loaded = parse_simple_yaml(path.read_text(encoding="utf-8"))
     _merge_dicts(merged, loaded)
     return merged
 
@@ -42,7 +42,7 @@ def _merge_dicts(base: dict[str, Any], incoming: dict[str, Any]) -> None:
         base[key] = value
 
 
-def _parse_simple_yaml(raw_text: str) -> dict[str, Any]:
+def parse_simple_yaml(raw_text: str) -> dict[str, Any]:
     """Parse the repository's small two-level YAML configuration format."""
     result: dict[str, Any] = {}
     stack: list[tuple[int, dict[str, Any]]] = [(-1, result)]

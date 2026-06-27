@@ -1,0 +1,5 @@
+name: generic_article
+description: "Default article-style Overleaf project."
+defaults:
+  document_class: article
+  bibliography_style: plainnat

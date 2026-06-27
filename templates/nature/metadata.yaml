@@ -1,0 +1,5 @@
+name: nature
+description: "Placeholder for Nature publisher template."
+defaults:
+  document_class: article
+  bibliography_style: naturemag

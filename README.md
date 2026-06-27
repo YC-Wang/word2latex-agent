@@ -1,8 +1,8 @@
 # word2latex-agent
 
-Version 0.6 generates a more complete Overleaf-ready LaTeX project template with
-configurable metadata, plus section, table, embedded figure, citation, and basic
-equation support.
+Version 0.7 adds a journal-template framework on top of the Overleaf-ready
+project generator, with configurable metadata plus section, table, embedded
+figure, citation, and basic equation support.
 
 ## Features
 
@@ -19,6 +19,8 @@ equation support.
 - detects OMML equations and converts simple displayed equations to LaTeX
 - preserves unsupported equations with a clear TODO placeholder
 - supports configurable project title, author, date, and document class
+- supports selectable output templates, including generic article/report layouts
+- includes placeholder publisher template folders for Copernicus, AGU, Springer, and Nature
 - writes `main.tex` plus `sections/*.tex`
 - creates an Overleaf-ready output folder
 - exposes a CLI through `run.py`
@@ -43,7 +45,12 @@ equation support.
 |       |-- latex_writer.py
 |       `-- models.py
 |-- templates/
-|   `-- main.tex.j2
+|   |-- generic_article/
+|   |-- generic_report/
+|   |-- copernicus/
+|   |-- agu/
+|   |-- springer/
+|   `-- nature/
 |-- tests/
 |   |-- fixtures.py
 |   `-- test_conversion.py
@@ -71,6 +78,18 @@ Run the converter against the included sample document:
 python run.py --input examples/sample.docx --output output/sample_project
 ```
 
+List available templates:
+
+```powershell
+python run.py --list-templates
+```
+
+Override the template from the command line:
+
+```powershell
+python run.py --input examples/sample.docx --output output/sample_project --template copernicus
+```
+
 Expected output:
 
 ```text
@@ -92,14 +111,36 @@ output/sample_project/
 Default behavior lives in `config.yaml`:
 
 ```yaml
+template: generic_article
 project:
   title: "Converted Word Document"
   author: "word2latex-agent"
   date: \today
 latex:
-  document_class: "article"
   include_toc: true
 ```
+
+To override the class explicitly, add for example:
+
+```yaml
+latex:
+  document_class: "report"
+```
+
+Supported template names:
+
+- `generic_article`
+- `generic_report`
+- `copernicus`
+- `agu`
+- `springer`
+- `nature`
+
+Template status:
+
+- `generic_article` and `generic_report` are fully implemented.
+- `copernicus`, `agu`, `springer`, and `nature` are placeholder structures that
+  can later be replaced with the official publisher class files and formatting.
 
 The generated `main.tex` always includes:
 
@@ -129,6 +170,8 @@ python -m unittest
 - Stable labels are generated with `fig:` and `tab:` prefixes.
 - The Overleaf-oriented preamble includes `graphicx`, `natbib`, `booktabs`,
   `longtable`, `amsmath`, `amssymb`, `hyperref`, and `geometry`.
+- Each template folder contains `main.tex.j2`, `preamble.tex.j2`,
+  `metadata.yaml`, and `README.md`.
 - Displayed equations are labeled with the `eq:` prefix.
 - Supported OMML equation conversions are intentionally limited to simple text,
   fractions, superscripts, and subscripts.
@@ -139,4 +182,5 @@ python -m unittest
 - `references.bib` currently contains placeholder BibTeX entries only.
 - If a document starts with body text before any heading, that content is placed
   into a default `Introduction` section.
+- Official publisher templates are not implemented yet.
 - Overleaf sync is intentionally not implemented yet.

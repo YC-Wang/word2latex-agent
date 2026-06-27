@@ -1,0 +1,5 @@
+name: copernicus
+description: "Placeholder for Copernicus publisher template."
+defaults:
+  document_class: article
+  bibliography_style: copernicus
